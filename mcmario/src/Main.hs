@@ -1,5 +1,6 @@
 module Main where
 
+import Data.Fixed
 import Data.List
 import Data.Ord
 import Math.Polynomial
@@ -48,11 +49,15 @@ threeOutOfFive f = f %^ 3 %*% (6 *% f %^ 2 %-% 15 *% f %+% constPoly 10)
 drMarioProb :: (Eq a, Fractional a) => Integer -> Integer -> a -> a -> a
 drMarioProb n1 n2 r1 r2 = evalPoly (threeOutOfFive (beta n1 n2)) (r1 / (r1+r2))
 
--- show good matchups between players where one player is thrice as fast as the other
+data E64
+instance HasResolution E64 where resolution _ = 10^64
+
+-- show good matchups between players where one player is a given factor as
+-- fast as the other
 main :: IO ()
 main = do
-	[r] <- map (toRational . (read :: String -> Double)) <$> getArgs
+	[r] <- map (read :: String -> Fixed E64) <$> getArgs
 	mapM_ print . sortBy (comparing (\(_,_,p) -> abs (p-0.5))) $ do
 		lo <- [4,8..84]
 		hi <- [4,8..84]
-		return (lo`div`4 - 1, hi`div`4 - 1, fromRational (drMarioProb lo hi r 1))
+		return (lo`div`4 - 1, hi`div`4 - 1, drMarioProb lo hi r 1)
