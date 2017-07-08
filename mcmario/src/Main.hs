@@ -192,6 +192,9 @@ gradAscend rate ratio gs rs
 	done = all (\(old, new) -> max old new / min old new < ratio)
 	           (M.intersectionWith (,) (learned rs) (learned rs'))
 
+-- TODO: Newton's method might be a lot better... fewer hand-tweaked
+-- parameters, at least. Worth trying.
+
 fast = T.pack "fast"
 slow = T.pack "slow"
 player1 = PlayerSettings fast 16 High
