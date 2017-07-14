@@ -1,34 +1,63 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Control.Applicative
+import Control.Concurrent
+import Control.Concurrent.STM
+import Control.Concurrent.STM.TChan
+import Control.Concurrent.STM.TVar
+import Control.Exception
+import Control.Monad
+import Control.Monad.IO.Class
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Csv
+	( DefaultOrdered
+	, EncodeOptions
+	, FromField
+	, FromNamedRecord
+	, ToField
+	, ToNamedRecord
+	)
 import Data.Default
+import Data.Foldable
 import Data.Monoid
 import Data.String
+import Data.Text (Text)
 import Data.Time
 import MCMario.GameDB
 import MCMario.RatingDB
 import System.Environment
 import System.Exit
+import System.IO
 import System.Posix.Files
+import Snap
+-- TODO: snap-extras brings along a pretty enormous collection of dependencies.
+-- Are they really worth the extra ten minutes build time just for writeJSON,
+-- which is after all a two-line function?
+import Snap.Extras.JSON
 import Text.Read
+
+import qualified Data.Aeson as JSON
+import qualified Data.Aeson.TH as JSON
+import qualified Data.Csv as CSV
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 
 instance ToNamedRecord GameRecord where
-	toNamedRecord r = namedRecord
-		[ fromString "winner-name"  .= name  (winner r)
-		, fromString "winner-level" .= level (winner r)
-		, fromString "winner-speed" .= speed (winner r)
-		, fromString "loser-name"   .= name  (loser  r)
-		, fromString "loser-level"  .= level (loser  r)
-		, fromString "loser-speed"  .= speed (loser  r)
-		, fromString "time"         .= date r
+	toNamedRecord r = CSV.namedRecord
+		[ fromString "winner-name"  CSV..= name  (winner r)
+		, fromString "winner-level" CSV..= level (winner r)
+		, fromString "winner-speed" CSV..= speed (winner r)
+		, fromString "loser-name"   CSV..= name  (loser  r)
+		, fromString "loser-level"  CSV..= level (loser  r)
+		, fromString "loser-speed"  CSV..= speed (loser  r)
+		, fromString "time"         CSV..= date r
 		]
 
 instance DefaultOrdered GameRecord where
-	headerOrder _ = header
+	headerOrder _ = CSV.header
 		[ fromString "winner-name"
 		, fromString "winner-level"
 		, fromString "winner-speed"
@@ -43,11 +72,11 @@ instance FromNamedRecord GameRecord where
 		go = liftA3 GameRecord
 			(parseSettings "winner")
 			(parseSettings "loser")
-			(m .: fromString "time")
+			(m CSV..: fromString "time")
 		parseSettings prefix = liftA3 PlayerSettings
-			(m .: fromString (prefix <> "-name"))
-			(m .: fromString (prefix <> "-level"))
-			(m .: fromString (prefix <> "-speed"))
+			(m CSV..: fromString (prefix <> "-name"))
+			(m CSV..: fromString (prefix <> "-level"))
+			(m CSV..: fromString (prefix <> "-speed"))
 
 instance ToField Speed where
 	toField High   = fromString "HI"
@@ -68,12 +97,12 @@ instance FromField UTCTime where
 		Just t  -> pure t
 		Nothing -> fail "expected a date"
 
-instance Default EncodeOptions where def = defaultEncodeOptions
+instance Default EncodeOptions where def = CSV.defaultEncodeOptions
 
 load :: FilePath -> IO GameDB
 load filename = do
 	bs <- LBS.readFile filename
-	case decodeByName bs of
+	case CSV.decodeByName bs of
 		Left err -> die err
 		Right (_, gs) -> return (foldr addGame def gs)
 
@@ -81,41 +110,117 @@ save :: FilePath -> GameDB -> IO ()
 save filename gdb = do
 	LBS.writeFile
 		(filename <> ".new")
-		(encodeByNameWith def (headerOrder GameRecord{}) (listGames gdb))
+		(CSV.encodeByNameWith def header (listGames gdb))
 	rename (filename <> ".new") filename
+	where
+	header = CSV.headerOrder (undefined :: GameRecord)
+
+defaultFilename :: FilePath
+defaultFilename = "games.csv"
+
+data Context = Context
+	{ filename :: FilePath
+	, gameDB :: TVar GameDB
+	, ratingDB :: TVar RatingDB
+	, ratingDBDirty :: TVar Bool
+	, diskDirty :: TVar Bool
+	}
+
+saveThread :: Context -> IO ()
+saveThread ctxt = forever $ do
+	gdb <- atomically $ do
+		dirty <- readTVar (diskDirty ctxt)
+		guard dirty
+		writeTVar (diskDirty ctxt) False
+		readTVar (gameDB ctxt)
+	save (filename ctxt) gdb
+
+-- TODO: restart the calculations in the middle if the dirty bit gets set
+ratingsUpdateThread :: Context -> IO ()
+ratingsUpdateThread ctxt = forever . atomically $ do
+	dirty <- readTVar (ratingDBDirty ctxt)
+	guard dirty
+	gdb <- readTVar (gameDB ctxt)
+	writeTVar (ratingDB ctxt) $! inferRatings gdb
+	writeTVar (ratingDBDirty ctxt) False
+
+readTVarSnap :: MonadIO m => TVar a -> m a
+readTVarSnap = liftIO . readTVarIO
+
+listPlayersJSON :: Context -> Snap ()
+listPlayersJSON ctxt = ifTop $
+	writeJSON . listPlayers =<< readTVarSnap (gameDB ctxt)
+
+requireUtf8Param :: MonadSnap m => BS.ByteString -> m Text
+requireUtf8Param label = do
+	bs <- getParam label
+	case T.decodeUtf8' <$> bs of
+		Just (Right text) -> return text
+		_ -> pass
+
+requireJSONParam :: (MonadSnap m, FromJSON a) => BS.ByteString -> m a
+requireJSONParam label = do
+	bs <- getParam label
+	case bs >>= JSON.decodeStrict of
+		Just v -> return v
+		_ -> pass
+
+JSON.deriveJSON JSON.defaultOptions ''Confidence
+JSON.deriveJSON JSON.defaultOptions ''Speed
+JSON.deriveJSON JSON.defaultOptions ''PlayerSettings
+JSON.deriveJSON JSON.defaultOptions ''GameRecord
+JSON.deriveJSON JSON.defaultOptions ''Matchup
+
+matchupJSON :: Context -> Snap ()
+matchupJSON ctxt = do
+	left  <- requireUtf8Param (fromString "left" )
+	right <- requireUtf8Param (fromString "right")
+	(gdb, rdb) <- liftIO . atomically $ do
+		gdb <- readTVar (gameDB ctxt)
+		rdb <- readTVar (ratingDB ctxt)
+		return (gdb, rdb)
+	writeJSON (matchup gdb rdb left right)
+
+addGamePost :: Context -> Snap ()
+addGamePost ctxt = do
+	winner <- requireJSONParam (fromString "winner")
+	loser  <- requireJSONParam (fromString "loser" )
+	now <- liftIO getCurrentTime
+	liftIO . atomically $ do
+		gdb <- readTVar (gameDB ctxt)
+		writeTVar (gameDB ctxt) (addGame (GameRecord winner loser now) gdb)
+		writeTVar (ratingDBDirty ctxt) True
+		writeTVar (diskDirty     ctxt) True
 
 main = do
 	args <- getArgs
-	case args of
-		[filename, "show"] -> load filename >>= print
-		[filename, "init"] -> save filename def
-		[filename, "add", n1_, l1_, s1_, n2_, l2_, s2_] -> do
-			l1 <- readIO l1_
-			s1 <- readIO s1_
-			l2 <- readIO l2_
-			s2 <- readIO s2_
-			now <- getCurrentTime
-			gdb <- load filename
-			let n1 = T.pack n1_
-			    n2 = T.pack n2_
-			    r = GameRecord (PlayerSettings n1 l1 s1) (PlayerSettings n2 l2 s2) now
-			save filename (addGame r gdb)
-		[filename, "suggest", n1_, n2_] -> do
-			gdb <- load filename
-			let n1 = T.pack n1_
-			    n2 = T.pack n2_
-			    rdb = inferRatings gdb
-			print (matchup gdb rdb n1 n2)
+	fn <- case args of
+		[fn] -> return fn
+		[] -> return defaultFilename
 		_ -> do
 			progName <- getProgName
-			putStrLn $ "USAGE: " <> progName <> " FILE CMD [ARGS]"
-			putStrLn "Manage a database of Dr. Mario games and get suggestions for handicapped games"
-			putStrLn ""
-			putStrLn "Commands are:"
-			putStrLn ""
-			putStrLn "\tinit      Create a new empty database"
-			putStrLn "\tshow      Print the contents of the database in a raw Haskell-y format"
-			putStrLn "\tadd PLAYER LEVEL SPEED PLAYER LEVEL SPEED"
-			putStrLn "\t          Add a game to the database. Winner comes first"
-			putStrLn "\tsuggest PLAYER PLAYER"
-			putStrLn "\t          Suggest settings for a match"
+			die $  "USAGE: " <> progName <> " [FILE]\n"
+			    <> "Manage a database of Dr. Mario games and get suggestions for handicapped games\n"
+			    <> "\n"
+			    <> "FILE defaults to " <> defaultFilename
+	gdb <- load fn `catch` \e -> do
+		let e' :: IOException
+		    e' = e
+		hPutStrLn stderr $ "WARNING: Could not open " <> fn <> "; using an empty game database"
+		return def
+	ctxt <- Context fn
+		<$> newTVarIO gdb
+		<*> newTVarIO def
+		<*> newTVarIO True
+		<*> newTVarIO False
+	forkIO (saveThread ctxt)
+	forkIO (ratingsUpdateThread ctxt)
+	httpServe mempty . asum $
+		[ method GET . route $
+			[ (fromString "players", listPlayersJSON ctxt)
+			, (fromString "matchup/:left/:right", matchupJSON ctxt)
+			]
+		, method POST . route $
+			[ (fromString "game", addGamePost ctxt)
+			]
+		]

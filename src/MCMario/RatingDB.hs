@@ -1,6 +1,7 @@
 module MCMario.RatingDB
-	( Rating
-	, Confidence
+	( RatingDB
+	, Rating
+	, Confidence(..)
 	, Matchup(..)
 	, inferRatings
 	, matchup
@@ -22,7 +23,8 @@ data Rating = Rating
 	, speedPref :: Speed     -- ^ a hack: precomputed most-frequent speed used by this person, stuffed in here so we don't have to figure it out afresh on each game
 	} deriving (Eq, Ord, Read, Show)
 
--- | Information used for choosing a handicap, organized by player.
+-- | Information used for choosing a handicap, organized by player. This type
+-- is intended to be abstract; don't rely on it being a @Map Name Rating@.
 type RatingDB  = Map Name Rating
 type Rates     = Map Name Rate
 type Gradients = Map Name Rate
@@ -95,6 +97,11 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 		f x = objective gs (setRate n x rs)
 		hi = r * 1.00001
 		lo = r / 1.00001
+
+-- TODO: perhaps we should divide by the number of games each player has
+-- played (or something like that), to counteract the effect that playing more
+-- games increases your sensitivity to rating changes, giving you a higher
+-- gradient
 
 -- | Given a learning parameter, do one step of gradient ascent. Smaller
 -- learning parameters learn more slowly, but at lower risk of oscillating
