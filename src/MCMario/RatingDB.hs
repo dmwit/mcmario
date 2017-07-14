@@ -150,7 +150,7 @@ matchup games ratings lName rName
 	where
 	defRating n = Rating 1 (S.singleton n) Medium
 	lRating = M.findWithDefault (defRating lName) lName ratings
-	rRating = M.findWithDefault (defRating lName) rName ratings
+	rRating = M.findWithDefault (defRating rName) rName ratings
 	lMelee = melee lRating
 	rMelee = melee rRating
 	confident   m = m { confidence = Confident   }
