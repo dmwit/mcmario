@@ -28,6 +28,7 @@ executable mcmario
                        fgl >=5.5 && <5.6,
                        polynomial >=0.7 && <0.8,
                        snap >=1.0 && <1.1,
+                       snap-core >=1.0 && <1.1,
                        snap-extras >=0.12 && <0.13,
                        stm >=2.4 && <2.5,
                        text >=1.2 && <1.3,

@@ -35,6 +35,7 @@ import Snap
 -- Are they really worth the extra ten minutes build time just for writeJSON,
 -- which is after all a two-line function?
 import Snap.Extras.JSON
+import Snap.Util.FileServe
 import Text.Read
 
 import qualified Data.Aeson as JSON
@@ -223,4 +224,5 @@ main = do
 		, method POST . route $
 			[ (fromString "game", addGamePost ctxt)
 			]
+		, serveDirectory "static"
 		]
