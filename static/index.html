@@ -7,19 +7,37 @@
 	<script src="ui.js"></script>
 </head>
 <body>
-	<div class="name-container">
-		<div class="name uninitialized" id="left-name">???</div>
-		<div class="clear" id="left-clear"><img src="x.png" alt="clear selection"></div>
+	<div class="player" id="left">
+		<div class="name-container">
+			<div class="name uninitialized">???</div>
+			<div class="clear"><img src="x.png" alt="clear selection"></div>
+			<div class="webdev-is-fun"></div>
+		</div>
+		<select class="speed" disabled="true" value="High">
+			<option value="Low">Low</option>
+			<option value="Medium">Med</option>
+			<option value="High">Hi</option>
+		</select>
+		<input class="level" type="number" min="0" max="20" disabled="true">
 		<div class="webdev-is-fun"></div>
 	</div>
-	<div class="level-container">
-		<img src="speed-bg.png" alt="Speed selector" id="speed-bg">
-		<img src="level-bg.png" alt="Level selector" id="level-bg">
-		<div class="webdev-is-fun"></div>
+	<div class="sync">
+		<input type="checkbox" id="sync" disabled="true">
+		<label for="sync">Keep levels synchronized</label>
 	</div>
-	<div class="name-container">
-		<div class="name uninitialized" id="right-name">???</div>
-		<div class="clear" id="right-clear"><img src="x.png" alt="clear selection"></div>
+	<div class="webdev-is-fun"></div>
+	<div class="player" id="right">
+		<div class="name-container">
+			<div class="name uninitialized">???</div>
+			<div class="clear" id="right-clear"><img src="x.png" alt="clear selection"></div>
+			<div class="webdev-is-fun"></div>
+		</div>
+		<select class="speed" disabled="true">
+			<option value="Low">Low</option>
+			<option value="Medium">Med</option>
+			<option value="High">Hi</option>
+		</select>
+		<input class="level" type="number" min="0" max="20" disabled="true">
 		<div class="webdev-is-fun"></div>
 	</div>
 	<div id="name-list">

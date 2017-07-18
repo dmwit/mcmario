@@ -1,41 +1,55 @@
-body { background-color: black; }
+.player {
+	font-size: 24px;
+	margin-top: 2ex;
+	margin-bottom: 2ex;
+}
 .name-container {
 	background-color: #078df6;
 	color: #e7eff6;
 	border-radius: 2ex;
-	font-size: 24px;
-	margin-left: 10%;
-	margin-right: 40%;
 	padding-top: 1ex;
 	padding-bottom: 1ex;
+	margin-left: 10%;
+	width: 50%;
+	float: left;
+}
+select {
+	font-size: inherit;
+	float: left;
+	margin-left: 10%;
+}
+input {
+	font-size: inherit;
+	float: right;
+	margin-right: 10%;
 }
 .uninitialized {
 	color: #034578;
 }
 .name {
-	width:90%;
+	width: 90%;
 	text-align: center;
 	float: left;
 }
 .clear {
-	width:10%;
+	width: 10%;
 	text-align: center;
 	float: right;
 }
+.sync {
+	float: right;
+	margin-right: 10%;
+	width: 14em;
+	font-size: small;
+	background-color: #078df6;
+	color: #e7eff6;
+	border-radius: 2ex;
+	padding-top: 1ex;
+	padding-bottom: 1ex;
+	padding-left: 2em;
+}
 .clear img { vertical-align: middle; }
 .webdev-is-fun { clear: both; }
-#speed-bg {
-	width: 25%;
-	margin-left: 10%;
-	margin-right: 10%;
-	image-rendering: pixelated;
-	vertical-align: middle;
-}
-#level-bg {
-	width: 45%;
-	image-rendering: pixelated;
-	vertical-align: middle;
-}
 #name-list {
 	margin-top: 10ex;
 }
