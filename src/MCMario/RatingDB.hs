@@ -206,7 +206,9 @@ unsafeMatchup lName lRating rName rRating = Matchup
 	, confidence = error "drat, somebody forgot to fix up the confidence field after calling unsafeMatchup"
 	}
 	where
-	(lLevel, (rLevel, _)) = minimumBy (comparing (abs . (0.5-) . snd . snd)) lToR
+	(lLevel, (rLevel, _))
+		| rate lRating == rate rRating = (7, (7, error "wow, observing this seems especially impossible"))
+		| otherwise = minimumBy (comparing (abs . (0.5-) . snd . snd)) lToR
 	lToR = [(level, bestMatch (rate lRating) (rate rRating) level) | level <- [0..20]]
 	rToL = [(level, bestMatch (rate rRating) (rate lRating) level) | level <- [0..20]]
 
