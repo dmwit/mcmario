@@ -141,6 +141,8 @@ function recordGame(ev) {
 function gameRecorded() {
 	clearPlayer({ data: "left" });
 	clearPlayer({ data: "right"});
+	// TODO: occasionally refresh the name list just to get the latest name
+	// ordering
 	if(shouldRefreshNameList) {
 		refreshNameList();
 		shouldRefreshNameList = false;

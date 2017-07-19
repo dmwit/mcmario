@@ -206,6 +206,8 @@ unsafeMatchup lName lRating rName rRating = Matchup
 	, confidence = error "drat, somebody forgot to fix up the confidence field after calling unsafeMatchup"
 	}
 	where
+	-- TODO: think about a less ad-hoc way of choosing (7,7); perhaps a simple
+	-- cost model that penalizes "extreme" matchups like 0/0 or 20/20
 	(lLevel, (rLevel, _))
 		| rate lRating == rate rRating = (7, (7, error "wow, observing this seems especially impossible"))
 		| otherwise = minimumBy (comparing (abs . (0.5-) . snd . snd)) lToR
