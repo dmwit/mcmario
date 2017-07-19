@@ -205,6 +205,12 @@ main = do
 			    <> "Manage a database of Dr. Mario games and get suggestions for handicapped games\n"
 			    <> "\n"
 			    <> "FILE defaults to " <> defaultFilename
+	fPort <- do
+		s <- getEnv "MCMARIO_PORT"
+		case (s, readMaybe s) of
+			("", _) -> return id
+			(_, Just p) | p > 0 -> return (setPort p)
+			_ -> die "MCMARIO_PORT must be a positive number"
 	gdb <- load fn `catch` \e -> do
 		let e' :: IOException
 		    e' = e
@@ -217,7 +223,7 @@ main = do
 		<*> newTVarIO False
 	forkIO (saveThread ctxt)
 	forkIO (ratingsUpdateThread ctxt)
-	httpServe mempty . asum $
+	httpServe (fPort mempty) . asum $
 		[ method GET . route $
 			[ (fromString "players", listPlayersJSON ctxt)
 			, (fromString "matchup/:left/:right", matchupJSON ctxt)
