@@ -6,6 +6,7 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
 import Control.Concurrent.STM.TVar
+import Control.DeepSeq
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
@@ -142,7 +143,7 @@ ratingsUpdateThread ctxt = forever . atomically $ do
 	dirty <- readTVar (ratingDBDirty ctxt)
 	guard dirty
 	gdb <- readTVar (gameDB ctxt)
-	writeTVar (ratingDB ctxt) $! inferRatings gdb
+	writeTVar (ratingDB ctxt) $!! inferRatings gdb
 	writeTVar (ratingDBDirty ctxt) False
 
 readTVarSnap :: MonadIO m => TVar a -> m a

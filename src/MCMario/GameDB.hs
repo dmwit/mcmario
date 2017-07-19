@@ -14,6 +14,7 @@ module MCMario.GameDB
 	, edgesBetween
 	) where
 
+import Control.DeepSeq
 import Data.Default
 import Data.List
 import Data.Map (Map)
@@ -34,6 +35,8 @@ type Name = Text
 -- | The speed pills drop.
 data Speed = Low | Medium | High
 	deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+instance NFData Speed where rnf x = x `seq` ()
 
 -- | A summary of how a match was set up for one of the two players involved.
 data PlayerSettings = PlayerSettings

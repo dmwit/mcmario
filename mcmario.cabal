@@ -25,6 +25,7 @@ executable mcmario
                        cassava >=0.5 && <0.6,
                        containers >=0.5.8 && <0.6,
                        data-default >=0.7 && <0.8,
+                       deepseq >=1.4 && <1.5,
                        fgl >=5.5 && <5.6,
                        polynomial >=0.7 && <0.8,
                        snap >=1.0 && <1.1,

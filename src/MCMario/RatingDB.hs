@@ -7,6 +7,7 @@ module MCMario.RatingDB
 	, matchup
 	) where
 
+import Control.DeepSeq
 import Data.List
 import Data.Map (Map)
 import Data.Ord
@@ -22,6 +23,9 @@ data Rating = Rating
 	, melee     :: Component -- ^ a group of people who each have winning and losing paths to each other, in some canonical order; 'rate's are comparable within a 'melee', but not across 'melee's
 	, speedPref :: Speed     -- ^ a hack: precomputed most-frequent speed used by this person, stuffed in here so we don't have to figure it out afresh on each game
 	} deriving (Eq, Ord, Read, Show)
+
+instance NFData Rating where
+	rnf (Rating r m s) = rnf r `seq` rnf m `seq` rnf s
 
 -- | Information used for choosing a handicap, organized by player. This type
 -- is intended to be abstract; don't rely on it being a @Map Name Rating@.
