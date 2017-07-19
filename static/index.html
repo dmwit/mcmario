@@ -10,7 +10,7 @@
 	<div class="player" id="left">
 		<div class="name-container">
 			<div class="name uninitialized">???</div>
-			<div class="clear"><img src="x.png" alt="clear selection"></div>
+			<div class="clear disabled"><img src="x.png" alt="clear selection"></div>
 			<div class="webdev-is-fun"></div>
 		</div>
 		<select class="speed" disabled="true" value="High">
@@ -29,7 +29,7 @@
 	<div class="player" id="right">
 		<div class="name-container">
 			<div class="name uninitialized">???</div>
-			<div class="clear" id="right-clear"><img src="x.png" alt="clear selection"></div>
+			<div class="clear disabled" id="right-clear"><img src="x.png" alt="clear selection"></div>
 			<div class="webdev-is-fun"></div>
 		</div>
 		<select class="speed" disabled="true">
@@ -40,7 +40,16 @@
 		<input class="level" type="number" min="0" max="20" disabled="true">
 		<div class="webdev-is-fun"></div>
 	</div>
-	<div id="name-list">
+	<div class="player" id="new-player">
+		<form>
+			<input type="text" class="name">
+			<input type="submit" id="add-player" value="Add">
+		</form>
+		<div class="webdev-is-fun"></div>
 	</div>
+	<div id="game-record-error-box" class="error hidden">
+		Something went wrong while trying to record the game. Feel free to try again.
+	</div>
+	<div id="name-list"></div>
 </body>
 </html>
