@@ -93,6 +93,19 @@ threeOutOfFive f = f %^ 3 %*% (6 *% f %^ 2 %-% 15 *% f %+% constPoly 10)
 -- | The (modeled) probability of one player beating another in a match of Dr.
 -- Mario, given the number of viruses each starts with and the rates that they
 -- each clear viruses at.
+--
+-- Things not currently modeled:
+--
+-- * Getting better (or worse) over time.
+-- * How good you are at getting combos and sending junk.
+-- * Losing (i.e. topping out).
+-- * Higher levels are harder not just because they have more viruses, but also
+--   because the viruses can appear higher in the bottle, reducing the time you
+--   have to make a decision about where to put your piece -- and, in extreme
+--   cases, sometimes making it difficult to even get a piece to a given
+--   position.
+-- * Related to the "how fast you can make decisions" thing: the speed
+--   (HI/MED/LOW) isn't accounted for at all.
 matchProbByVirusCount :: Integer -> Integer -> Rate -> Rate -> Rate
 matchProbByVirusCount n1 n2 r1 r2 = evalPoly poly (r1 / (r1+r2)) where
 	poly = fromMaybe (threeOutOfFive (beta n1 n2)) (M.lookup (n1, n2) matchPolyCache)
