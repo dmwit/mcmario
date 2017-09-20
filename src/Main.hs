@@ -30,6 +30,7 @@ import MCMario.RatingDB
 import System.Environment
 import System.Exit
 import System.IO
+import System.IO.Error
 import System.Posix.Files
 import Snap
 -- TODO: snap-extras brings along a pretty enormous collection of dependencies.
@@ -207,7 +208,8 @@ main = do
 			    <> "\n"
 			    <> "FILE defaults to " <> defaultFilename
 	fPort <- do
-		s <- getEnv "MCMARIO_PORT"
+		s <- catch (getEnv "MCMARIO_PORT")
+		           (\e -> if isDoesNotExistError e then return "" else throwIO e)
 		case (s, readMaybe s) of
 			("", _) -> return id
 			(_, Just p) | p > 0 -> return (setPort p)
