@@ -3,7 +3,7 @@ module MCMario.RatingDB
 	, Rating
 	, Confidence(..)
 	, Matchup(..)
-	, inferRatings
+	, improveRatings
 	, matchup
 	) where
 
@@ -33,22 +33,22 @@ type RatingDB  = Map Name Rating
 type Rates     = Map Name Rate
 type Gradients = Map Name Rate
 
--- | Use gradient ascent to infer ratings for each player from their win/loss
--- record against other players. Uses the previous ratings as hints about what
--- the new ratings should probably be.
-inferRatings :: GameDB -> RatingDB -> RatingDB
-inferRatings gdb rdb = id
+-- | Use gradient ascent to improve the estimated ratings for each player from
+-- their win/loss record against other players. Does a given number of steps of
+-- gradient ascent.
+improveRatings :: Word -> GameDB -> RatingDB -> RatingDB
+improveRatings iters gdb rdb = id
 	. M.unions
-	. map (inferComponentRatings gdb rdb)
+	. map (improveComponentRatings iters gdb rdb)
 	. components
 	$ gdb
 
--- | Infer the ratings for a single connected component of the game graph.
-inferComponentRatings :: GameDB -> RatingDB -> Component -> RatingDB
-inferComponentRatings gdb rdb ns = id
+-- | Improve the ratings for a single connected component of the game graph.
+improveComponentRatings :: Word -> GameDB -> RatingDB -> Component -> RatingDB
+improveComponentRatings iters gdb rdb ns = id
 	. M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
 	. M.insert chosenName 1
-	. gradAscend 1e-3 1.000001 (componentGames gdb ns)
+	. gradAscend iters 1e-3 (componentGames gdb ns)
 	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
 	. M.fromSet (const 1)
 	$ otherNames
@@ -127,14 +127,10 @@ gradAscendStep learningRate gs rs = M.intersectionWith
 --
 -- The learning parameter is assumed to be positive, and the ratio is assumed
 -- to be greater than 1.
-gradAscend :: Rate -> Rate -> [GameRecord] -> Rates -> Rates
-gradAscend learningRate ratio gs rs
-	| done = rs'
-	| otherwise = gradAscend learningRate ratio gs rs'
-	where
-	rs' = gradAscendStep learningRate gs rs
-	done = all (\(old, new) -> max old new / min old new < ratio)
-	           (M.intersectionWith (,) rs rs')
+gradAscend :: Word -> Rate -> [GameRecord] -> Rates -> Rates
+gradAscend iters learningRate gs rs = genericIndex
+	(iterate (gradAscendStep learningRate gs) rs)
+	iters
 
 -- TODO: Newton's method might be a lot better... fewer hand-tweaked
 -- parameters, at least. Worth trying.

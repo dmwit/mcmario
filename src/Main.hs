@@ -25,6 +25,7 @@ import Data.Monoid
 import Data.String
 import Data.Text (Text)
 import Data.Time
+import Data.Word
 import MCMario.GameDB
 import MCMario.RatingDB
 import System.Environment
@@ -125,7 +126,7 @@ data Context = Context
 	{ filename :: FilePath
 	, gameDB :: TVar GameDB
 	, ratingDB :: TVar RatingDB
-	, ratingDBDirty :: TVar Bool
+	, ratingDBIterations :: TVar Word
 	, diskDirty :: TVar Bool
 	}
 
@@ -138,15 +139,26 @@ saveThread ctxt = forever $ do
 		readTVar (gameDB ctxt)
 	save (filename ctxt) gdb
 
--- TODO: restart the calculations in the middle if the dirty bit gets set
+-- How many times to try improving the rating database before writing the
+-- result and checking for an updated game database. Fewer is better because it
+-- means we will throw away less work when a game is recorded; more is better
+-- because it means we spend less time doing STM stuff per improvement.
+iterationsPerSTMUpdate :: Word
+iterationsPerSTMUpdate = 100
+
+-- Declare success even if the ratings database is still changing after this
+-- many attempts to improve it.
+maxIterations :: Word
+maxIterations = 10000
+
 ratingsUpdateThread :: Context -> IO ()
 ratingsUpdateThread ctxt = forever . atomically $ do
-	dirty <- readTVar (ratingDBDirty ctxt)
-	guard dirty
+	i <- readTVar (ratingDBIterations ctxt)
+	guard (i < maxIterations)
 	gdb <- readTVar (gameDB ctxt)
 	rdb <- readTVar (ratingDB ctxt)
-	writeTVar (ratingDB ctxt) $!! inferRatings gdb rdb
-	writeTVar (ratingDBDirty ctxt) False
+	writeTVar (ratingDB ctxt) $!! improveRatings iterationsPerSTMUpdate gdb rdb
+	writeTVar (ratingDBIterations ctxt) (i+iterationsPerSTMUpdate)
 
 readTVarSnap :: MonadIO m => TVar a -> m a
 readTVarSnap = liftIO . readTVarIO
@@ -193,8 +205,8 @@ addGamePost ctxt = do
 	liftIO . atomically $ do
 		gdb <- readTVar (gameDB ctxt)
 		writeTVar (gameDB ctxt) (addGame (GameRecord winner loser now) gdb)
-		writeTVar (ratingDBDirty ctxt) True
-		writeTVar (diskDirty     ctxt) True
+		writeTVar (ratingDBIterations ctxt) 0
+		writeTVar (diskDirty ctxt) True
 
 main = do
 	args <- getArgs
@@ -222,7 +234,7 @@ main = do
 	ctxt <- Context fn
 		<$> newTVarIO gdb
 		<*> newTVarIO def
-		<*> newTVarIO True
+		<*> newTVarIO 0
 		<*> newTVarIO False
 	forkIO (saveThread ctxt)
 	forkIO (ratingsUpdateThread ctxt)
