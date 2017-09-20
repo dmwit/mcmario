@@ -143,7 +143,8 @@ ratingsUpdateThread ctxt = forever . atomically $ do
 	dirty <- readTVar (ratingDBDirty ctxt)
 	guard dirty
 	gdb <- readTVar (gameDB ctxt)
-	writeTVar (ratingDB ctxt) $!! inferRatings gdb
+	rdb <- readTVar (ratingDB ctxt)
+	writeTVar (ratingDB ctxt) $!! inferRatings gdb rdb
 	writeTVar (ratingDBDirty ctxt) False
 
 readTVarSnap :: MonadIO m => TVar a -> m a

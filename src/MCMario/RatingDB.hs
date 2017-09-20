@@ -34,20 +34,22 @@ type Rates     = Map Name Rate
 type Gradients = Map Name Rate
 
 -- | Use gradient ascent to infer ratings for each player from their win/loss
--- record against other players.
-inferRatings :: GameDB -> RatingDB
-inferRatings db = id
+-- record against other players. Uses the previous ratings as hints about what
+-- the new ratings should probably be.
+inferRatings :: GameDB -> RatingDB -> RatingDB
+inferRatings gdb rdb = id
 	. M.unions
-	. map (inferComponentRatings db)
+	. map (inferComponentRatings gdb rdb)
 	. components
-	$ db
+	$ gdb
 
 -- | Infer the ratings for a single connected component of the game graph.
-inferComponentRatings :: GameDB -> Component -> RatingDB
-inferComponentRatings db ns = id
-	. M.mapWithKey (\n r -> Rating r ns (preferredSpeed db n))
+inferComponentRatings :: GameDB -> RatingDB -> Component -> RatingDB
+inferComponentRatings gdb rdb ns = id
+	. M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
 	. M.insert chosenName 1
-	. gradAscend 1e-3 1.000001 (componentGames db ns)
+	. gradAscend 1e-3 1.000001 (componentGames gdb ns)
+	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
 	. M.fromSet (const 1)
 	$ otherNames
 	where
