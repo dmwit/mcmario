@@ -208,6 +208,29 @@ addGamePost ctxt = do
 		writeTVar (ratingDBIterations ctxt) 0
 		writeTVar (diskDirty ctxt) True
 
+debug :: Context -> Snap ()
+debug ctxt = do
+	modifyResponse (setContentType (fromString "text/plain"))
+	(gdb, rdb, rdbi, dirty) <- liftIO . atomically $ do
+		gdb   <- readTVar (gameDB             ctxt)
+		rdb   <- readTVar (ratingDB           ctxt)
+		rdbi  <- readTVar (ratingDBIterations ctxt)
+		dirty <- readTVar (diskDirty          ctxt)
+		return (gdb, rdb, rdbi, dirty)
+	writeString $  "Storing games in " <> show (filename ctxt)
+	            <> " (currently " <> (if dirty then "out of date" else "up to date") <> ")\n"
+	writeString $  "Rating estimates have improved " <> show rdbi <> " times since last game DB update"
+	            <> " (currently configured to take " <> show iterationsPerSTMUpdate
+	            <> " improvement steps per write, up to " <> show maxIterations <> " total)\n"
+	writeString $  "Complete rating database dump:\n" <> show rdb <> "\n"
+	writeString $  "Complete game database dump:\n" <> show gdb <> "\n"
+	where writeString = writeText . fromString
+
+gamesCSV :: Context -> Snap ()
+gamesCSV ctxt = do
+	modifyResponse (setContentType (fromString "text/csv"))
+	sendFile (filename ctxt)
+
 main = do
 	args <- getArgs
 	fn <- case args of
@@ -242,6 +265,8 @@ main = do
 		[ method GET . route $
 			[ (fromString "players", listPlayersJSON ctxt)
 			, (fromString "matchup/:left/:right", matchupJSON ctxt)
+			, (fromString "debug.txt", debug ctxt)
+			, (fromString "games.csv", gamesCSV ctxt) -- the endpoint is called games.csv no matter what actual database it's using
 			]
 		, method POST . route $
 			[ (fromString "game", addGamePost ctxt)
