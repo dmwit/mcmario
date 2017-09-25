@@ -36,19 +36,21 @@ type Gradients = Map Name Rate
 -- | Use gradient ascent to improve the estimated ratings for each player from
 -- their win/loss record against other players. Does a given number of steps of
 -- gradient ascent.
-improveRatings :: Word -> GameDB -> RatingDB -> RatingDB
-improveRatings iters gdb rdb = id
-	. M.unions
-	. map (improveComponentRatings iters gdb rdb)
+improveRatings :: GameDB -> RatingDB -> [RatingDB]
+improveRatings gdb rdb = id
+	. map M.unions
+	. transpose
+	. map (improveComponentRatings gdb rdb)
 	. components
 	$ gdb
 
 -- | Improve the ratings for a single connected component of the game graph.
-improveComponentRatings :: Word -> GameDB -> RatingDB -> Component -> RatingDB
-improveComponentRatings iters gdb rdb ns = id
-	. M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
-	. M.insert chosenName 1
-	. gradAscend iters 1e-3 (componentGames gdb ns)
+improveComponentRatings :: GameDB -> RatingDB -> Component -> [RatingDB]
+improveComponentRatings gdb rdb ns = id
+	. map ( M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
+	      . M.insert chosenName 1
+	      )
+	. gradAscend 1e-3 (componentGames gdb ns)
 	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
 	. M.fromSet (const 1)
 	$ otherNames
@@ -127,10 +129,8 @@ gradAscendStep learningRate gs rs = M.intersectionWith
 --
 -- The learning parameter is assumed to be positive, and the ratio is assumed
 -- to be greater than 1.
-gradAscend :: Word -> Rate -> [GameRecord] -> Rates -> Rates
-gradAscend iters learningRate gs rs = genericIndex
-	(iterate (gradAscendStep learningRate gs) rs)
-	iters
+gradAscend :: Rate -> [GameRecord] -> Rates -> [Rates]
+gradAscend learningRate gs rs = iterate (gradAscendStep learningRate gs) rs
 
 -- TODO: Newton's method might be a lot better... fewer hand-tweaked
 -- parameters, at least. Worth trying.

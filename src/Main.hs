@@ -21,6 +21,7 @@ import Data.Csv
 	)
 import Data.Default
 import Data.Foldable
+import Data.List
 import Data.Monoid
 import Data.String
 import Data.Text (Text)
@@ -122,10 +123,11 @@ save filename gdb = do
 defaultFilename :: FilePath
 defaultFilename = "games.csv"
 
+-- invariant: ratingDB's list is infinite
 data Context = Context
 	{ filename :: FilePath
 	, gameDB :: TVar GameDB
-	, ratingDB :: TVar RatingDB
+	, ratingDB :: TVar [RatingDB]
 	, ratingDBIterations :: TVar Word
 	, diskDirty :: TVar Bool
 	}
@@ -155,10 +157,10 @@ ratingsUpdateThread :: Context -> IO ()
 ratingsUpdateThread ctxt = forever . atomically $ do
 	i <- readTVar (ratingDBIterations ctxt)
 	guard (i < maxIterations)
-	gdb <- readTVar (gameDB ctxt)
-	rdb <- readTVar (ratingDB ctxt)
-	writeTVar (ratingDB ctxt) $!! improveRatings iterationsPerSTMUpdate gdb rdb
-	writeTVar (ratingDBIterations ctxt) (i+iterationsPerSTMUpdate)
+	rdbs <- readTVar (ratingDB ctxt)
+	let rdbs' = genericDrop iterationsPerSTMUpdate rdbs
+	writeTVar (ratingDB ctxt) rdbs'
+	head rdbs' `deepseq` writeTVar (ratingDBIterations ctxt) (i+iterationsPerSTMUpdate)
 
 readTVarSnap :: MonadIO m => TVar a -> m a
 readTVarSnap = liftIO . readTVarIO
@@ -193,8 +195,8 @@ matchupJSON ctxt = do
 	right <- requireUtf8Param (fromString "right")
 	(gdb, rdb) <- liftIO . atomically $ do
 		gdb <- readTVar (gameDB ctxt)
-		rdb <- readTVar (ratingDB ctxt)
-		return (gdb, rdb)
+		rdbs <- readTVar (ratingDB ctxt)
+		return (gdb, head rdbs)
 	writeJSON (matchup gdb rdb left right)
 
 addGamePost :: Context -> Snap ()
@@ -204,7 +206,9 @@ addGamePost ctxt = do
 	now <- liftIO getCurrentTime
 	liftIO . atomically $ do
 		gdb <- readTVar (gameDB ctxt)
+		rdbs <- readTVar (ratingDB ctxt)
 		writeTVar (gameDB ctxt) (addGame (GameRecord winner loser now) gdb)
+		writeTVar (ratingDB ctxt) (improveRatings gdb (head rdbs))
 		writeTVar (ratingDBIterations ctxt) 0
 		writeTVar (diskDirty ctxt) True
 
@@ -213,10 +217,10 @@ debug ctxt = do
 	modifyResponse (setContentType (fromString "text/plain"))
 	(gdb, rdb, rdbi, dirty) <- liftIO . atomically $ do
 		gdb   <- readTVar (gameDB             ctxt)
-		rdb   <- readTVar (ratingDB           ctxt)
+		rdbs  <- readTVar (ratingDB           ctxt)
 		rdbi  <- readTVar (ratingDBIterations ctxt)
 		dirty <- readTVar (diskDirty          ctxt)
-		return (gdb, rdb, rdbi, dirty)
+		return (gdb, head rdbs, rdbi, dirty)
 	writeString $  "Storing games in " <> show (filename ctxt)
 	            <> " (currently " <> (if dirty then "out of date" else "up to date") <> ")\n"
 	writeString $  "Rating estimates have improved " <> show rdbi <> " times since last game DB update"
@@ -256,7 +260,7 @@ main = do
 		return def
 	ctxt <- Context fn
 		<$> newTVarIO gdb
-		<*> newTVarIO def
+		<*> newTVarIO (improveRatings gdb def)
 		<*> newTVarIO 0
 		<*> newTVarIO False
 	forkIO (saveThread ctxt)
