@@ -96,7 +96,11 @@ objective gs rs = sum $ map gameObjective gs where
 		l2 = level (loser  g)
 		r1 = M.findWithDefault 1 (name (winner g)) rs
 		r2 = M.findWithDefault 1 (name (loser  g)) rs
-		v  = fullPrecisionRate (matchProbByVirusLevel l1 l2 r1 r2)
+		v  = fullPrecisionRate . clipProb $ matchProbByVirusLevel l1 l2 r1 r2
+
+	-- log 0 is -Infinity, that's right out
+	-- log 1 is perfectly fine, but let's avoid it anyway for symmetry
+	clipProb = min (1-epsilon) . max epsilon
 
 -- | Find the approximate gradient of the objective function numerically.
 numericGradient :: [GameRecord] -> Rates -> Gradients
