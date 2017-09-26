@@ -146,7 +146,7 @@ saveThread ctxt = forever $ do
 -- means we will throw away less work when a game is recorded; more is better
 -- because it means we spend less time doing STM stuff per improvement.
 iterationsPerSTMUpdate :: Word
-iterationsPerSTMUpdate = 100
+iterationsPerSTMUpdate = 1
 
 -- Declare success even if the ratings database is still changing after this
 -- many attempts to improve it.
