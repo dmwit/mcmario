@@ -207,8 +207,9 @@ addGamePost ctxt = do
 	liftIO . atomically $ do
 		gdb <- readTVar (gameDB ctxt)
 		rdbs <- readTVar (ratingDB ctxt)
-		writeTVar (gameDB ctxt) (addGame (GameRecord winner loser now) gdb)
-		writeTVar (ratingDB ctxt) (improveRatings gdb (head rdbs))
+		let gdb' = addGame (GameRecord winner loser now) gdb
+		writeTVar (gameDB ctxt) gdb'
+		writeTVar (ratingDB ctxt) (improveRatings gdb' (head rdbs))
 		writeTVar (ratingDBIterations ctxt) 0
 		writeTVar (diskDirty ctxt) True
 
