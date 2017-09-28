@@ -105,6 +105,14 @@ objective gs rs = sum $ map gameObjective gs where
 	-- log 1 is perfectly fine, but let's avoid it anyway for symmetry
 	clipProb = min (1-epsilon) . max epsilon
 
+-- TODO: Currently, when finding the gradient at player X, we compute the
+-- objective function over all games in X's component. But actually the
+-- gradient for X only depends on the games X participated in, so we could
+-- compute the objective on a much smaller set of games without affecting the
+-- gradient. This should be more efficient by a pretty fair margin. For bonus
+-- points, only partition the game database once for each player and not once
+-- for each player and each iteration of gradient ascent.
+
 -- | Find the approximate gradient of the objective function numerically.
 numericGradient :: [GameRecord] -> Rates -> Gradients
 numericGradient gs rs = M.mapWithKey numGradAt rs where
