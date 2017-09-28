@@ -36,7 +36,7 @@ function selectName() {
 
 function addName() {
 	var name = $("#new-player .name").prop("value");
-	// Just to filter out mistaken clicks. The serve itself doesn't care what
+	// Just to filter out mistaken clicks. The server itself doesn't care what
 	// name you pick.
 	if(name.match(/[a-zA-Z]/)) queueName(name);
 	shouldRefreshNameList = true;
