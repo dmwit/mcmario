@@ -38,6 +38,9 @@ type Gradients = Map Name Rate
 -- gradient ascent.
 improveRatings :: GameDB -> RatingDB -> [RatingDB]
 improveRatings gdb rdb = id
+	. (++repeat rdb) -- funny edge case: if the GameDB is empty, there are no
+	                 -- components and we get an empty list of RatingDBs
+	                 -- instead of an infinite one
 	. map M.unions
 	. transpose
 	. map (improveComponentRatings gdb rdb)
