@@ -138,6 +138,7 @@ gradAscendStep learningRate gs rs = M.intersectionWith
 	(numericGradient gs rs)
 
 -- TODO: look into using SBV's SReal for the optimization problem here
+
 -- | Given a learning parameter and a ratio, iterate gradient ascent until all
 -- ratings have stabilized (are not changing by more than the ratio in either
 -- direction).

@@ -55,6 +55,7 @@ epsilon = MkFixed 1
 
 -- TODO: address https://stackoverflow.com/q/45067989/791604
 -- (if it hasn't been fixed upstream already)
+
 -- | Take the geometric mean with all the available precision. Assumes a
 -- non-empty container.
 geometricMean :: (Functor f, Foldable f) => f Rate -> Rate
@@ -88,6 +89,7 @@ threeOutOfFive f = f %^ 3 %*% (6 *% f %^ 2 %-% 15 *% f %+% constPoly 10)
 
 -- TODO: taking out extra factors of (n1+n2-1)!/((n1-1)!(n2-1)!) could keep the
 -- numbers a bit smaller
+
 -- Type used to be this, before we wanted to cache polynomials:
 -- matchProbByVirusCount :: (Eq a, Fractional a) => Integer -> Integer -> a -> a -> a
 -- | The (modeled) probability of one player beating another in a match of Dr.
