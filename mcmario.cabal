@@ -14,8 +14,11 @@ cabal-version:       >=1.10
 
 executable mcmario
   main-is:             mcmario.hs
-  other-modules:       MCMario.CSV,
+  other-modules:       Data.MonoidMap,
+                       Data.Partition,
+                       MCMario.CSV,
                        MCMario.GameDB,
+                       MCMario.GameDB.QueryCache,
                        MCMario.Model,
                        MCMario.RatingDB
   -- other-extensions:    
