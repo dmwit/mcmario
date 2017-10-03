@@ -53,7 +53,7 @@ improveComponentRatings gdb rdb ns = id
 	. map ( M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
 	      . M.insert chosenName 1
 	      )
-	. gradAscend 1e-3 (componentGames gdb ns)
+	. gradAscend 1e-2 (componentGames gdb ns)
 	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
 	. M.fromSet (const 1)
 	$ otherNames
