@@ -53,7 +53,7 @@ improveComponentRatings gdb rdb ns = id
 	. map ( M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
 	      . M.insert chosenName 1
 	      )
-	. gradAscend 1e-2 (componentGames gdb ns)
+	. gradAscend 1e-2 1.5 (componentGames gdb ns)
 	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
 	. M.fromSet (const 1)
 	$ otherNames
@@ -121,27 +121,46 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 		hi = r * 1.00001
 		lo = r / 1.00001
 
--- | Given a learning parameter, do one step of gradient ascent. Smaller
--- learning parameters learn more slowly, but at lower risk of oscillating
--- wildly.
+-- TODO: This adjustmentFactor stuff is assuming everything is positive; should
+-- be bother being worried about that? Currently:
+-- 1. The adjustmentFactor is a constant, chosen by the caller, and our only
+--    caller chooses a positive constant.
+-- 2. The default rating is 1, which is positive.
+-- 3. Having a rating switch sign is not sane.
+-- So I think it's okay for now. But if any of the above assumptions get
+-- invalidated in the future we might be in trouble!
+
+-- | Given a learning parameter and a maximum adjustment factor, do one step of
+-- gradient ascent. Smaller learning parameters learn more slowly, but at lower
+-- risk of oscillating wildly. The maximum adjustment factor can also be used
+-- to avoid oscillations: each individual rate will be clipped to be within
+-- this factor of its previous value.
 --
--- The learning parameter is assumed to be positive.
-gradAscendStep :: Rate -> [GameRecord] -> Rates -> Rates
-gradAscendStep learningRate gs rs = M.intersectionWith
-	(\v dv -> max epsilon (v + dv*learningRate))
+-- The learning parameter and adjustment factor are assumed to be positive.
+gradAscendStep :: Rate -> Rate -> [GameRecord] -> Rates -> Rates
+gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
+	(\v dv -> clip v (v + dv*learningRate))
 	rs
 	(numericGradient gs rs)
+	where
+	clip v = id
+		. max epsilon
+		. max (v/adjustmentFactor)
+		. min (v*adjustmentFactor)
 
 -- TODO: look into using SBV's SReal for the optimization problem here
 
--- | Given a learning parameter and a ratio, iterate gradient ascent until all
--- ratings have stabilized (are not changing by more than the ratio in either
--- direction).
+-- | Given a learning parameter and an adjustment factor, iterate gradient
+-- ascent. As with a single step of gradient ascent, smaller learning
+-- parameters learn more slowly, but at lower risk of oscillating wildly. The
+-- maximum adjustment factor can also be used to avoid oscillations: at each
+-- step of gradient ascent, each individual rate will be clipped to be within
+-- this factor of its previous value.
 --
--- The learning parameter is assumed to be positive, and the ratio is assumed
--- to be greater than 1.
-gradAscend :: Rate -> [GameRecord] -> Rates -> [Rates]
-gradAscend learningRate gs rs = iterate (gradAscendStep learningRate gs) rs
+-- The learning parameter and adjustment factor are assumed to be positive.
+gradAscend :: Rate -> Rate -> [GameRecord] -> Rates -> [Rates]
+gradAscend learningRate adjustmentFactor gs rs
+	= iterate (gradAscendStep learningRate adjustmentFactor gs) rs
 
 -- TODO: Newton's method might be a lot better... fewer hand-tweaked
 -- parameters, at least. Worth trying.
