@@ -93,7 +93,7 @@ setRate n = M.insert n . max epsilon
 --
 -- Any player with no 'Rate' is given a 'Rate' of 1.
 objective :: [GameRecord] -> Rates -> Double
-objective gs rs = sum $ map gameObjective gs where
+objective gs rs = sum (map gameObjective gs) / genericLength gs where
 	gameObjective g = log (fromInteger v) where
 		l1 = level (winner g)
 		l2 = level (loser  g)
@@ -120,11 +120,6 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 		f x = objective gs (setRate n x rs)
 		hi = r * 1.00001
 		lo = r / 1.00001
-
--- TODO: perhaps we should divide by the number of games each player has
--- played (or something like that), to counteract the effect that playing more
--- games increases your sensitivity to rating changes, giving you a higher
--- gradient
 
 -- | Given a learning parameter, do one step of gradient ascent. Smaller
 -- learning parameters learn more slowly, but at lower risk of oscillating
