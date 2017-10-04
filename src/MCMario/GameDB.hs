@@ -46,11 +46,17 @@ data PlayerSettings = PlayerSettings
 	}
 	deriving (Eq, Ord, Read, Show)
 
+instance NFData PlayerSettings where
+	rnf (PlayerSettings n l s) = rnf n `seq` rnf l `seq` rnf s
+
 -- | The settings used to play a match, along with who won.
 data GameRecord = GameRecord
 	{ winner, loser :: PlayerSettings
 	, date :: UTCTime
 	} deriving (Eq, Ord, Read, Show)
+
+instance NFData GameRecord where
+	rnf (GameRecord w l d) = rnf w `seq` rnf l `seq` rnf d
 
 -- Invariant: if node a points to node b with label e, then both of these hold:
 -- 	name (winner e) = a
@@ -64,6 +70,9 @@ data GameDB = GameDB
 
 instance Default (Gr a b) where def = G.empty
 instance Default GameDB where def = GameDB def def
+
+instance NFData GameDB where
+	rnf (GameDB gs ns) = rnf gs `seq` rnf ns
 
 -- | Add a game to the database.
 addGame :: GameRecord -> GameDB -> GameDB
