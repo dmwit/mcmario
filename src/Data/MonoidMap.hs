@@ -1,6 +1,7 @@
 module Data.MonoidMap
 	( MMap
 	, singleton
+	, fromDistinctAscList
 	, (!)
 	) where
 
@@ -37,6 +38,9 @@ instance (Ord k, Monoid v) => Monoid (MMap k v) where
 
 singleton :: k -> v -> MMap k v
 singleton k v = MMap (M.singleton k v)
+
+fromDistinctAscList :: [(k, v)] -> MMap k v
+fromDistinctAscList = MMap . M.fromDistinctAscList
 
 (!) :: (Ord k, Monoid v) => MMap k v -> k -> v
 MMap m ! k = M.findWithDefault mempty k m
