@@ -3,15 +3,30 @@ module MCMario.GameDB.QueryCache
 	  -- 'GameDB', but which can be more cheaply incrementally updated as
 	  -- 'GameRecord's are added.
 	  QueryCache
-	, gdb
 	, fromGameDB
+	, addGame
+	, gdb
+	, melee
+	, edgesBetween
+	, speedPref
+	, components
+	, playerComponentGames
+	, listPlayers
+	, Name
+	, Speed(..)
+	, PlayerSettings(..)
+	, GameRecord(..)
+	, GameDB
+	, Component
 	) where
 
+import Data.List
 import Data.Map (Map)
 import Data.Monoid
 import Data.MonoidMap (MMap)
+import Data.Ord
 import Data.Partition (Partition)
-import MCMario.GameDB (Name, Speed(..), PlayerSettings(..), GameRecord(..), GameDB)
+import MCMario.GameDB (Name, Component, Speed(..), PlayerSettings(..), GameRecord(..), GameDB)
 import qualified Data.Map as M
 import qualified Data.MonoidMap as MM
 import qualified Data.Partition as P
@@ -20,26 +35,66 @@ import qualified MCMario.GameDB as GDB
 data QueryCache = QueryCache
 	{ gdb :: GameDB
 	, playerStats :: MMap Name PlayerStats
-	, components :: Partition Name
+	, meleeGames :: MMap Name [GameRecord]
+	, melees :: Partition Name
 	} deriving (Eq, Show)
 
 fromGameDB :: GameDB -> QueryCache
 fromGameDB gdb = QueryCache
 	{ gdb = gdb
-	, playerStats = foldMap fromGameRecord (GDB.listGames gdb)
-	, components = P.unsafeFromSets (GDB.components gdb)
+	, playerStats = foldMap statsFromGameRecord (GDB.listGames gdb)
+	, meleeGames = MM.fromList (GDB.playersComponentGames gdb cs)
+	, melees = P.unsafeFromSets cs
 	}
+	where
+	cs = GDB.components gdb
 
 addGame :: GameRecord -> QueryCache -> QueryCache
 addGame g qc = QueryCache
 	{ gdb = gdb'
-	, playerStats = mappend (fromGameRecord g) (playerStats qc)
-	, components = if P.sameSubset (components qc) (name (winner g)) (name (loser g))
-	               then components qc
-	               else P.unsafeFromSets (GDB.components gdb')
+	, playerStats = mappend (statsFromGameRecord g) (playerStats qc)
+	, meleeGames = if sameMelee
+	               then mappend (gamesFromGameRecord g) (meleeGames qc)
+	               -- TODO: only recalculate when the melee changes
+	               else MM.fromList (GDB.playersComponentGames gdb' cs)
+	, melees = if sameMelee
+	           then melees qc
+	           else P.unsafeFromSets cs
 	}
 	where
 	gdb' = GDB.addGame g (gdb qc)
+	cs = GDB.components gdb'
+	sameMelee = P.sameSubset (melees qc) (name (winner g)) (name (loser g))
+
+gamesFromGameRecord :: GameRecord -> MMap Name [GameRecord]
+gamesFromGameRecord g
+	=  MM.singleton (name (loser  g)) [g]
+	<> MM.singleton (name (winner g)) [g]
+
+melee :: QueryCache -> Name -> Component
+melee = P.subset . melees
+
+components :: QueryCache -> [Component]
+components = P.subsets . melees
+
+edgesBetween :: QueryCache -> Component -> Component -> [GameRecord]
+edgesBetween = GDB.edgesBetween . gdb
+
+speedPref :: QueryCache -> Name -> Speed
+speedPref qc n = fst . minimumBy (comparing fst) $ pairs where
+	counts = speeds (playerStats qc MM.! n)
+	pairs | counts == mempty = [(Medium, 1)]
+	      | otherwise = [(s, counts MM.! s) | s <- [Low, Medium, High]]
+
+playerComponentGames :: QueryCache -> Name -> [GameRecord]
+playerComponentGames qc n = meleeGames qc MM.! n
+
+listPlayers :: QueryCache -> [Name]
+listPlayers = id
+	. map fst
+	. sortBy (comparing (negate . games . snd))
+	. MM.toList
+	. playerStats
 
 data PlayerStats = PlayerStats
 	{ games  :: Sum Int
@@ -59,11 +114,13 @@ instance Monoid PlayerStats where
 		, levels = levels s1 `mappend` levels s2
 		}
 
-fromGameRecord :: GameRecord -> MMap Name PlayerStats
-fromGameRecord g = fromPlayerSettings (winner g) `mappend` fromPlayerSettings (loser g)
+statsFromGameRecord :: GameRecord -> MMap Name PlayerStats
+statsFromGameRecord g
+	=  statsFromPlayerSettings (winner g)
+	<> statsFromPlayerSettings (loser  g)
 
-fromPlayerSettings :: PlayerSettings -> MMap Name PlayerStats
-fromPlayerSettings ps = MM.singleton (name ps) PlayerStats
+statsFromPlayerSettings :: PlayerSettings -> MMap Name PlayerStats
+statsFromPlayerSettings ps = MM.singleton (name ps) PlayerStats
 	{ games  = 1
 	, speeds = MM.singleton (speed ps) 1
 	, levels = levelsMap MM.! level ps

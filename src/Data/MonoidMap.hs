@@ -1,11 +1,13 @@
 module Data.MonoidMap
 	( MMap
 	, singleton
+	, fromList
 	, fromDistinctAscList
 	, (!)
+	, toList
 	) where
 
-import Data.Foldable
+import Data.Foldable (fold)
 import Data.Map (Map)
 import Data.Monoid
 import qualified Data.Map as M
@@ -39,11 +41,17 @@ instance (Ord k, Monoid v) => Monoid (MMap k v) where
 singleton :: k -> v -> MMap k v
 singleton k v = MMap (M.singleton k v)
 
+fromList :: Ord k => [(k, v)] -> MMap k v
+fromList = MMap . M.fromList
+
 fromDistinctAscList :: [(k, v)] -> MMap k v
 fromDistinctAscList = MMap . M.fromDistinctAscList
 
 (!) :: (Ord k, Monoid v) => MMap k v -> k -> v
 MMap m ! k = M.findWithDefault mempty k m
+
+toList :: (Monoid v, Eq v) => MMap k v -> [(k, v)]
+toList = M.toList . unMMap . prune
 
 -- | Semantically the identity, but operationally deletes keys that map to
 -- 'mempty'.

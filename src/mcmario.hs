@@ -18,7 +18,7 @@ import Data.String
 import Data.Text (Text)
 import Data.Time
 import Data.Word
-import MCMario.GameDB
+import MCMario.GameDB.QueryCache
 import MCMario.RatingDB
 import MCMario.CSV
 import System.Environment
@@ -46,7 +46,7 @@ defaultFilename = "games.csv"
 -- invariant: ratingDB's list is infinite
 data Context = Context
 	{ filename :: FilePath
-	, gameDB :: TVar GameDB
+	, gameDB :: TVar QueryCache
 	, ratingDB :: TVar [RatingDB]
 	, ratingDBIterations :: TVar Word
 	, diskDirty :: TVar Bool
@@ -54,12 +54,12 @@ data Context = Context
 
 saveThread :: Context -> IO ()
 saveThread ctxt = forever $ do
-	gdb <- atomically $ do
+	qc <- atomically $ do
 		dirty <- readTVar (diskDirty ctxt)
 		guard dirty
 		writeTVar (diskDirty ctxt) False
 		readTVar (gameDB ctxt)
-	save (filename ctxt) gdb
+	save (filename ctxt) (gdb qc)
 
 -- How many times to try improving the rating database before writing the
 -- result and checking for an updated game database. Fewer is better because it
@@ -148,7 +148,7 @@ debug ctxt = do
 	            <> " (currently configured to take " <> show iterationsPerSTMUpdate
 	            <> " improvement steps per write, up to " <> show maxIterations <> " total)\n"
 	writeString $  "Complete rating database dump:\n" <> show rdb <> "\n"
-	writeString $  "Complete game database dump:\n" <> show gdb <> "\n"
+	writeString $  "Complete query cache dump:\n" <> show gdb <> "\n"
 	where writeString = writeText . fromString
 
 gamesCSV :: Context -> Snap ()
@@ -179,9 +179,10 @@ main = do
 		    e' = e
 		hPutStrLn stderr $ "WARNING: Could not open " <> fn <> "; using an empty game database"
 		return def
+	let qc = fromGameDB gdb
 	ctxt <- Context fn
-		<$> newTVarIO gdb
-		<*> newTVarIO (improveRatings gdb def)
+		<$> newTVarIO qc
+		<*> newTVarIO (improveRatings qc def)
 		<*> newTVarIO 0
 		<*> newTVarIO False
 	forkIO (saveThread ctxt)

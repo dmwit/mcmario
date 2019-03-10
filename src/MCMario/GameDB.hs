@@ -9,6 +9,8 @@ module MCMario.GameDB
 	, listPlayers
 	, listGames
 	, playerGames
+	, playerComponentGames
+	, playersComponentGames
 	, components
 	, componentGames
 	, edgesBetween
@@ -107,6 +109,24 @@ playerGames :: GameDB -> Name -> [GameRecord]
 playerGames GameDB { games = gs, nodes = ns } n = case M.lookup n ns of
 	Nothing   -> []
 	Just node -> [r | (r, _) <- G.lneighbors gs node]
+
+-- | List all games played by a given player against others in his melee.
+playerComponentGames :: GameDB -> Component -> Name -> [GameRecord]
+playerComponentGames gdb c n =
+	[ r
+	| r <- playerGames gdb n
+	,  name (winner r) `S.member` c
+	|| name (loser  r) `S.member` c
+	]
+
+-- | Like 'playersComponentGames', but do everybody. Assumes you have already
+-- computed the strongly-connected components of the graph yourself.
+playersComponentGames :: GameDB -> [Component] -> [(Name, [GameRecord])]
+playersComponentGames gdb cs =
+	[ (n, playerComponentGames gdb c n)
+	| c <- cs
+	, n <- S.toList c
+	]
 
 -- | A strongly connected component in the game graph (where nodes are players
 -- and edges point from winner to loser). That is, a maximal collection of

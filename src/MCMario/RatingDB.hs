@@ -1,6 +1,5 @@
 module MCMario.RatingDB
 	( RatingDB
-	, Rating
 	, Confidence(..)
 	, Matchup(..)
 	, improveRatings
@@ -12,31 +11,21 @@ import Data.List
 import Data.Map (Map)
 import Data.Ord
 import Data.Set (Set)
-import MCMario.GameDB
+import MCMario.GameDB.QueryCache
 import MCMario.Model
 import qualified Data.Map as M
 import qualified Data.Set as S
 
--- | Information used for choosing a handicap.
-data Rating = Rating
-	{ rate      :: Rate      -- ^ how quickly this person clears viruses compared to others in their melee
-	, melee     :: Component -- ^ a group of people who each have winning and losing paths to each other, in some canonical order; 'rate's are comparable within a 'melee', but not across 'melee's
-	, speedPref :: Speed     -- ^ a hack: precomputed most-frequent speed used by this person, stuffed in here so we don't have to figure it out afresh on each game
-	} deriving (Eq, Ord, Read, Show)
-
-instance NFData Rating where
-	rnf (Rating r m s) = rnf r `seq` rnf m `seq` rnf s
-
 -- | Information used for choosing a handicap, organized by player. This type
--- is intended to be abstract; don't rely on it being a @Map Name Rating@.
-type RatingDB  = Map Name Rating
-type Rates     = Map Name Rate
-type Gradients = Map Name Rate
+-- is intended to be abstract; don't rely on it being a @Map Name Rate@.
+type RatingDB  = Map Name Rate
+type Rates     = Map Name Rate -- partial DB: some keys may be missing
+type Gradients = Map Name Rate -- contains derivatives of rates, not rates
 
 -- | Use gradient ascent to improve the estimated ratings for each player from
 -- their win/loss record against other players. Does a given number of steps of
 -- gradient ascent.
-improveRatings :: GameDB -> RatingDB -> [RatingDB]
+improveRatings :: QueryCache -> RatingDB -> [RatingDB]
 improveRatings gdb rdb = id
 	. (++repeat rdb) -- funny edge case: if the GameDB is empty, there are no
 	                 -- components and we get an empty list of RatingDBs
@@ -48,31 +37,15 @@ improveRatings gdb rdb = id
 	$ gdb
 
 -- | Improve the ratings for a single connected component of the game graph.
-improveComponentRatings :: GameDB -> RatingDB -> Component -> [RatingDB]
+improveComponentRatings :: QueryCache -> RatingDB -> Component -> [RatingDB]
 improveComponentRatings gdb rdb ns = id
-	. map ( M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
-	      . M.insert chosenName 1
-	      )
-	. gradAscend 1e-2 1.5 (componentGames gdb ns)
-	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
+	. map (M.insert chosenName 1)
+	. gradAscend 1e-2 1.5 gdb
+	. M.union (M.restrictKeys rdb otherNames)
 	. M.fromSet (const 1)
 	$ otherNames
 	where
 	(chosenName, otherNames) = S.deleteFindMin ns
-
-preferredSpeed :: GameDB -> Name -> Speed
-preferredSpeed db n = id
-	. fst
-	. head
-	. sortBy (comparing (negate . snd))
-	. ((Medium,0):) -- so that there is always at least one entry
-	. M.toList
-	. M.fromListWith (+)
-	$ [ (speed settings, 1)
-	  | r <- playerGames db n
-	  , settings <- [winner r, loser r]
-	  , name settings == n
-	  ]
 
 -- | Set somebody's rate. Does some minor sanity checking to make sure the rate
 -- is positive.
@@ -114,10 +87,10 @@ objective gs rs = sum (map gameObjective gs) / genericLength gs where
 -- for each player and each iteration of gradient ascent.
 
 -- | Find the approximate gradient of the objective function numerically.
-numericGradient :: [GameRecord] -> Rates -> Gradients
+numericGradient :: QueryCache -> Rates -> Gradients
 numericGradient gs rs = M.mapWithKey numGradAt rs where
 	numGradAt n r = realToFrac (f hi - f lo) / (hi - lo) where
-		f x = objective gs (setRate n x rs)
+		f x = objective (playerComponentGames gs n) (setRate n x rs)
 		hi = r * 1.00001
 		lo = r / 1.00001
 
@@ -137,7 +110,7 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 -- this factor of its previous value.
 --
 -- The learning parameter and adjustment factor are assumed to be positive.
-gradAscendStep :: Rate -> Rate -> [GameRecord] -> Rates -> Rates
+gradAscendStep :: Rate -> Rate -> QueryCache -> Rates -> Rates
 gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
 	(\v dv -> clip v (v + dv*learningRate))
 	rs
@@ -158,7 +131,7 @@ gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
 -- this factor of its previous value.
 --
 -- The learning parameter and adjustment factor are assumed to be positive.
-gradAscend :: Rate -> Rate -> [GameRecord] -> Rates -> [Rates]
+gradAscend :: Rate -> Rate -> QueryCache -> Rates -> [Rates]
 gradAscend learningRate adjustmentFactor gs rs
 	= iterate (gradAscendStep learningRate adjustmentFactor gs) rs
 
@@ -182,17 +155,16 @@ data Matchup = Matchup
 	} deriving (Eq, Ord, Read, Show)
 
 -- | Suggest player settings, using some combination of precomputed information
--- in the 'RatingDB' given and manual queries to the 'GameDB' given.
-matchup :: GameDB -> RatingDB -> Name -> Name -> Matchup
+-- in the 'RatingDB' given and manual queries to the 'QueryCache' given.
+matchup :: QueryCache -> RatingDB -> Name -> Name -> Matchup
 matchup games ratings lName rName
-	| lMelee == rMelee = confident   $ unsafeMatchup lName lRating  rName rRating
-	| otherwise        = provisional $ unsafeMatchup lName lRating' rName rRating'
+	| lMelee == rMelee = confident   $ unsafeMatchup games lName lRating  rName rRating
+	| otherwise        = provisional $ unsafeMatchup games lName lRating' rName rRating'
 	where
-	defRating n = Rating 1 (S.singleton n) Medium
-	lRating = M.findWithDefault (defRating lName) lName ratings
-	rRating = M.findWithDefault (defRating rName) rName ratings
-	lMelee = melee lRating
-	rMelee = melee rRating
+	lRating = M.findWithDefault 1 lName ratings
+	rRating = M.findWithDefault 1 rName ratings
+	lMelee = melee games lName
+	rMelee = melee games rName
 	confident   m = m { confidence = Confident   }
 	provisional m = m { confidence = Provisional }
 
@@ -205,30 +177,29 @@ matchup games ratings lName rName
 	                       $ edgesBetween games lMelee rMelee
 	meanRate name rating melee = id
 		. geometricMean
-		. fmap rate
-		. M.insert name rating -- in case M.findWithDefault had to use the default
+		. M.insert name rating -- in case the player doesn't exist in the DB yet
 		$ ratings `M.restrictKeys` melee
 	lMeanRate = meanRate lName lRating lMelee
 	rMeanRate = meanRate rName rRating rMelee
-	lRating' = lRating { rate = rate lRating / lMeanRate * 1.3^length lWinEdges }
-	rRating' = rRating { rate = rate rRating / rMeanRate * 1.3^length rWinEdges }
+	lRating' = lRating / lMeanRate * 1.3^length lWinEdges
+	rRating' = rRating / rMeanRate * 1.3^length rWinEdges
 
 -- | Internal use only. Given some names and ratings, produce a matchup. Unsafe for two reasons:
 --
 -- 1. Completely ignores the 'melee' of the two ratings. If the 'rate's aren't
 -- comparable, you'll get garbage outputs.
 -- 2. Doesn't set the 'confidence' of the output.
-unsafeMatchup :: Name -> Rating -> Name -> Rating -> Matchup
-unsafeMatchup lName lRating rName rRating = Matchup
+unsafeMatchup :: QueryCache -> Name -> Rate -> Name -> Rate -> Matchup
+unsafeMatchup qc lName lRating rName rRating = Matchup
 	{ left = PlayerSettings
 		{ name  = lName
 		, level = lLevel
-		, speed = speedPref lRating
+		, speed = speedPref qc lName
 		}
 	, right = PlayerSettings
 		{ name  = rName
 		, level = rLevel
-		, speed = speedPref rRating
+		, speed = speedPref qc rName
 		}
 	, leftToRight = M.fromAscList $ map (fmap fst) lToR
 	, rightToLeft = M.fromAscList $ map (fmap fst) rToL
@@ -238,10 +209,10 @@ unsafeMatchup lName lRating rName rRating = Matchup
 	-- TODO: think about a less ad-hoc way of choosing (7,7); perhaps a simple
 	-- cost model that penalizes "extreme" matchups like 0/0 or 20/20
 	(lLevel, (rLevel, _))
-		| rate lRating == rate rRating = (7, (7, error "wow, observing this seems especially impossible"))
+		| lRating == rRating = (7, (7, error "wow, observing this seems especially impossible"))
 		| otherwise = minimumBy (comparing (abs . (0.5-) . snd . snd)) lToR
-	lToR = [(level, bestMatch (rate lRating) (rate rRating) level) | level <- [0..20]]
-	rToL = [(level, bestMatch (rate rRating) (rate lRating) level) | level <- [0..20]]
+	lToR = [(level, bestMatch lRating rRating level) | level <- [0..20]]
+	rToL = [(level, bestMatch rRating lRating level) | level <- [0..20]]
 
 -- | If @bestMatch r1 r2 level1 = (level2, prob)@, then
 --

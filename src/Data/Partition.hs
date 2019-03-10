@@ -1,7 +1,7 @@
 module Data.Partition
 	( Partition
 	, fromMap, unsafeFromSets
-	, subset, sameSubset
+	, subset, subsets, sameSubset
 	) where
 
 import Data.IntMap (IntMap)
@@ -46,6 +46,10 @@ unsafeFromSets ss = fromMap (M.fromList [(a, s) | s <- ss, a <- S.toList s])
 -- `unsafeFromSets` can get simpler)
 subset :: Ord a => Partition a -> a -> Set a
 subset p a = fromMaybe (S.singleton a) (M.lookup a (_subset p) >>= flip IM.lookup (_elements p))
+
+-- | Explicitly enumerate the sets that make up the partition.
+subsets :: Partition a -> [Set a]
+subsets = IM.elems . _elements
 
 -- TODO: make x == y a fast path?
 -- | @sameSubset p x y = subset p x == subset p y@, but more efficient
