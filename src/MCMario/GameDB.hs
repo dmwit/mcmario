@@ -1,7 +1,8 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
 module MCMario.GameDB
 	( Name
-	, Speed(..)
-	, PlayerSettings(..)
+	, Winner(..)
 	, GameRecord(..)
 	, GameDB
 	, Component
@@ -15,7 +16,10 @@ module MCMario.GameDB
 	) where
 
 import Control.DeepSeq
+import Control.Monad.State
 import Data.Default
+import Data.Either
+import Data.Foldable
 import Data.List
 import Data.Map (Map)
 import Data.Maybe
@@ -26,45 +30,44 @@ import Data.Graph.Inductive.PatriciaTree (Gr)
 import Data.Graph.Inductive.Graph (Graph, Node)
 import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Query.DFS as G
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 import qualified Data.Set as S
 
 -- | A player's name.
 type Name = Text
 
--- | The speed pills drop.
-data Speed = Low | Medium | High
-	deriving (Bounded, Enum, Eq, Ord, Read, Show)
-
-instance NFData Speed where rnf x = x `seq` ()
-
--- | A summary of how a match was set up for one of the two players involved.
-data PlayerSettings = PlayerSettings
-	{ name :: Name
-	, level :: Integer
-	, speed :: Speed
-	}
-	deriving (Eq, Ord, Read, Show)
-
-instance NFData PlayerSettings where
-	rnf (PlayerSettings n l s) = rnf n `seq` rnf l `seq` rnf s
+data Winner = Blue | Tie | Orange deriving (Bounded, Enum, Eq, Ord, Read, Show)
+instance NFData Winner where rnf x = x `seq` ()
 
 -- | The settings used to play a match, along with who won.
+--
+-- The right team's score is multiplied by the handicap to determine the
+-- winner.
 data GameRecord = GameRecord
-	{ winner, loser :: PlayerSettings
+	{ blue, orange :: Set Name
+	, handicap :: Rational
+	, winner :: Winner
 	, date :: UTCTime
 	} deriving (Eq, Ord, Read, Show)
 
 instance NFData GameRecord where
-	rnf (GameRecord w l d) = rnf w `seq` rnf l `seq` rnf d
+	rnf (GameRecord b o h w d) = rnf b `seq` rnf o `seq` rnf h `seq` rnf w `seq` rnf d
 
--- Invariant: if node a points to node b with label e, then both of these hold:
--- 	name (winner e) = a
--- 	name (loser  e) = b
+-- Invariants:
+--
+-- 1. The graph is bipartite, with Name nodes in one half and GameRecord nodes
+--    in the other.
+-- 2. Tie games have outgoing edges to each Name on both teams (and no other
+--    outgoing edges) and no incoming edges.
+-- 3. All other games have incoming edges from each Name on the winning team
+--    and outgoing edges to each Name on the losing team (and no other incident
+--    edges).
+-- 4. Node i has label Left n in games iff key n has value i in nodes.
 
 -- | A record of all games played.
 data GameDB = GameDB
-	{ games :: Gr Name GameRecord
+	{ games :: Gr (Either Name GameRecord) ()
 	, nodes :: Map Name Node
 	} deriving (Eq, Read, Show)
 
@@ -76,71 +79,89 @@ instance NFData GameDB where
 
 -- | Add a game to the database.
 addGame :: GameRecord -> GameDB -> GameDB
-addGame r db = GameDB (G.insEdge (src, dst, r) gs) ns where
-	(db' , src) = findPlayer (name . winner $ r) db
-	(db'', dst) = findPlayer (name . loser  $ r) db'
-	GameDB gs ns = db''
+addGame r = execState $ do
+	blueNodes   <- traverse findPlayer . S.toList . blue   $ r
+	orangeNodes <- traverse findPlayer . S.toList . orange $ r
+	[gameNode]  <- gets (G.newNodes 1 . games)
+	onGames (G.insNode (gameNode, Right r))
+	traverse_ (addEdge Blue   gameNode)   blueNodes
+	traverse_ (addEdge Orange gameNode) orangeNodes
+	where
+	onGames f = modify (\db -> db { games = f (games db) })
 
-	findPlayer name db = case M.lookup name (nodes db) of
-		Nothing -> (GameDB gs' ns', node) where
-			GameDB gs ns = db
+	findPlayer name = state $ \db@(GameDB gs ns) -> case M.lookup name ns of
+		Nothing -> (node, GameDB gs' ns') where
 			[node] = G.newNodes 1 gs
 			ns' = M.insert name node ns
-			gs' = G.insNode (node, name) gs
-		Just node -> (db, node)
+			gs' = G.insNode (node, Left name) gs
+		Just node -> (node, db)
+
+	addEdge dir gameNode playerNode
+		| winner r == dir = onGames (G.insEdge (playerNode, gameNode, ()))
+		| otherwise       = onGames (G.insEdge (gameNode, playerNode, ()))
 
 -- | List all players, ordered by how many games they have played.
 listPlayers :: GameDB -> [Name]
-listPlayers GameDB { games = gs } = id
-	. map snd
-	. sort
-	. map (\(node, name) -> (negate . G.deg gs $ node, name))
-	. G.labNodes
-	$ gs
+listPlayers db = map snd . sort $
+	[ (negate $ G.deg (games db) node, name)
+	| (name, node) <- M.toList (nodes db)
+	]
 
 -- | List all games, in no particular order (e.g. for serialization).
 listGames :: GameDB -> [GameRecord]
-listGames = edges . games
+listGames = snd . partitionEithers . map snd . G.labNodes . games
 
 -- | List all games played by a given player.
 playerGames :: GameDB -> Name -> [GameRecord]
 playerGames GameDB { games = gs, nodes = ns } n = case M.lookup n ns of
-	Nothing   -> []
-	Just node -> [r | (r, _) <- G.lneighbors gs node]
+	Nothing -> []
+	Just playerNode ->
+		[ r
+		| gameNode <- G.neighbors gs playerNode
+		, Just (Right r) <- [G.lab gs gameNode]
+		]
 
--- | A strongly connected component in the game graph (where nodes are players
--- and edges point from winner to loser). That is, a maximal collection of
--- players where each pair of players in the collection has a winning path and
--- a losing path connecting them.
+-- | A maximal collection of players where all of the following hold:
+--
+-- 1. Each pair of players in the collection has a winning path connecting
+--    them.
+-- 2. Each pair of players in the collection has a losing path connecting them.
+-- 3. Some tie game involves only players from the collection.
 type Component = Set Name
 
 -- | Retrieve the collections of people it makes sense to rate against each
 -- other.
 components :: GameDB -> [Component]
-components GameDB { games = gs } = map (S.fromList . map (fromJust . G.lab gs)) . G.scc $ gs
+components GameDB { games = gs } =
+	[ S.fromList names
+	| scc_ <- G.scc gs
+	, let scc = map (fromJust . G.lab gs) scc_
+	      (names, games) = partitionEithers scc
+	, any ((Tie==) . winner) games
+	]
 
--- | Retrieve all games played by a specific set of people. So named because
--- the most sensible thing to call this on is a strongly connected component
--- (see 'components').
+-- | Retrieve all games in which at least one of the players is in the given
+-- component. Internal only.
+laxComponentGames :: GameDB -> Set Name -> [GameRecord]
+laxComponentGames db ns =
+	[ game
+	| gameNode <- IS.toList . IS.fromList $
+		[ gameNode
+		| n <- S.toList ns
+		, Just playerNode <- [M.lookup n (nodes db)]
+		, gameNode <- G.neighbors (games db) playerNode
+		]
+	, Just (Right game) <- [G.lab (games db) gameNode]
+	]
+
+-- | Retrieve all games in which all players were in the given component.
 componentGames :: GameDB -> Component -> [GameRecord]
-componentGames db ns = id
-	. edges
-	. G.labfilter (`S.member` ns)
-	. games
-	$ db
+componentGames db ns = filter
+	(\g -> S.isSubsetOf (blue g) ns && S.isSubsetOf (orange g) ns)
+	(laxComponentGames db ns)
 
 -- | Find edges from one component to another (in either direction).
 edgesBetween :: GameDB -> Component -> Component -> [GameRecord]
-edgesBetween db ns ns' =
-	[ r
-	-- Externally, componentGames is supposed to be called on a strongly
-	-- connected component. Here we violate this rule; but it should be safe
-	-- with the current implementation.
-	| r <- componentGames db (ns `S.union` ns')
-	, name (winner r) `S.member` ns /= name (loser r) `S.member` ns
-	]
-
--- | Get all the edge labels from a graph. You'd think fgl would have this
--- somewhere, but I couldn't find it (and neither could Hoogle).
-edges :: Graph gr => gr n e -> [e]
-edges = map (\(_,_,e) -> e) . G.labEdges
+edgesBetween db ns ns' = filter
+	(\g -> winner g /= Tie)
+	(laxComponentGames db (ns `S.union` ns'))
