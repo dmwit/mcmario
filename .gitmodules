@@ -1,0 +1,3 @@
+[submodule "polynomial"]
+	path = polynomial
+	url = git@github.com:dmwit/polynomial
