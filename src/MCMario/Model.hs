@@ -3,35 +3,14 @@ module MCMario.Model
 	, fullPrecisionRate
 	, epsilon
 	, geometricMean
-	, matchProbByVirusCount
-	, matchProbByVirusLevel
-	,  gameProbByVirusCount
-	,  gameProbByVirusLevel
+	, winProbability
+	, tieProbability
 	) where
 
 import Data.Fixed
-import Data.List
-import Data.Map (Map)
-import Data.Maybe
+import Data.List.Split
+import Data.Ratio
 import Math.NumberTheory.Powers.General
-import Math.Polynomial
-import qualified Data.Map as M
-
-infix  8 %^
-infixl 7 %*%
-infix  7  *%
-infixl 6 %+%
-infixl 6 %-%
-(%^ ) :: (Eq a, Num a) => Poly a -> Integer -> Poly a
-(%*%) :: (Eq a, Num a) => Poly a -> Poly a  -> Poly a
-( *%) :: (Eq a, Num a) =>      a -> Poly a  -> Poly a
-(%+%) :: (Eq a, Num a) => Poly a -> Poly a  -> Poly a
-(%-%) :: (Eq a, Num a) => Poly a -> Poly a  -> Poly a
-(%^ ) = powPoly
-(%*%) = multPoly
-(*% ) = scalePoly
-(%+%) = addPoly
-p1 %-% p2 = p1 %+% negatePoly p2
 
 -- | For numbers stored as multiples of 1e-100.
 data E100
@@ -68,73 +47,38 @@ geometricMean rs
 	. fmap (\(MkFixed i) -> i) -- TODO: coerce?
 	$ rs
 
--- links of interest:
---
--- https://stats.stackexchange.com/q/264861
--- https://en.wikipedia.org/wiki/Gamma_distribution
--- https://en.wikipedia.org/wiki/Beta_distribution
--- https://en.wikipedia.org/wiki/Binomial_distribution
+-- | Given a rate at which goals are scored, compute the unnormalized weights
+-- of each possible number of goals. (Unnormalized: this computes the Poisson
+-- distribution, but without the exponential factor that makes it sum to 1.)
+goalCountWeights :: Rate -> [Rate]
+goalCountWeights r = takeWhile (>0) $ scanl (\w i -> w*r/i) 1 [1,2..]
 
--- | The CDF of the Beta distribution with parameters @n1@ and @n2@ is @beta n1 n2@.
-beta :: (Eq a, Fractional a) => Integer -> Integer -> Poly a
-beta n1 n2 = orderings *% poly where
-	[lo, hi] = sort [n1, n2] -- do fewer multiplications
-	orderings = fromInteger $ product [hi .. lo + hi - 1] `div` product [2 .. lo - 1]
-	poly = polyIntegral $ x %^ (n1-1) %*% (one %-% x) %^ (n2-1)
+-- | Like 'exp', but actually works.
+expRate :: Rate -> Rate
+expRate = sum . goalCountWeights
 
--- | If an event happens with probability @p@, then that event happens at least
--- three times out of five with probability @6p^5 - 15p^4 + 10p^3@.
-threeOutOfFive :: (Eq a, Num a) => Poly a -> Poly a
-threeOutOfFive f = f %^ 3 %*% (6 *% f %^ 2 %-% 15 *% f %+% constPoly 10)
+-- | Given a handicap -- a factor by which player 2's score is multiplied --
+-- and the rates at which player 1 and player 2 score goals, compute the
+-- probability that player 1 wins.
+winProbability :: Rational -> Rate -> Rate -> Rate
+winProbability handicap r1 r2 = totalWeight / normalizationFactor where
+	normalizationFactor = expRate (r1+r2)
+	winningScoresForPlayer1 = map (floor . (1+)) . iterate (handicap+) $ 0
+	winningScoreDeltasForPlayer1 = zipWith (-) (tail winningScoresForPlayer1) winningScoresForPlayer1
+	weights1 = id
+		. takeWhile (not . null)
+		. scanl (flip drop) (drop 1 $ goalCountWeights r1)
+		$ winningScoreDeltasForPlayer1
+	weights2 = goalCountWeights r2
+	totalWeight = sum . concat $ zipWith (\w1s w2 -> map (w2*) w1s) weights1 weights2
 
--- TODO: taking out extra factors of (n1+n2-1)!/((n1-1)!(n2-1)!) could keep the
--- numbers a bit smaller
-
--- Type used to be this, before we wanted to cache polynomials:
--- matchProbByVirusCount :: (Eq a, Fractional a) => Integer -> Integer -> a -> a -> a
--- | The (modeled) probability of one player beating another in a match of Dr.
--- Mario, given the number of viruses each starts with and the rates that they
--- each clear viruses at.
---
--- Things not currently modeled:
---
--- * Getting better (or worse) over time.
--- * How good you are at getting combos and sending junk.
--- * Losing (i.e. topping out).
--- * Higher levels are harder not just because they have more viruses, but also
---   because the viruses can appear higher in the bottle, reducing the time you
---   have to make a decision about where to put your piece -- and, in extreme
---   cases, sometimes making it difficult to even get a piece to a given
---   position.
--- * Related to the "how fast you can make decisions" thing: the speed
---   (HI/MED/LOW) isn't accounted for at all.
-matchProbByVirusCount :: Integer -> Integer -> Rate -> Rate -> Rate
-matchProbByVirusCount n1 n2 r1 r2 = evalPoly poly (r1 / (r1+r2)) where
-	poly = fromMaybe (threeOutOfFive (beta n1 n2)) (M.lookup (n1, n2) matchPolyCache)
-
--- | Like 'matchProbByVirusCount', except it takes Dr. Mario virus levels from
--- 0-20 rather than virus counts.
-matchProbByVirusLevel :: Integer -> Integer -> Rate -> Rate -> Rate
-matchProbByVirusLevel level1 level2 = matchProbByVirusCount (4*level1 + 4) (4*level2 + 4)
-
--- | The (modeled) probability of one player beating another in a single round
--- of Dr. Mario (which would serve as part of a best-of-five in a usual match),
--- given the number of viruses each starts with and the rates that they each
--- clear viruses at.
-gameProbByVirusCount :: Integer -> Integer -> Rate -> Rate -> Rate
-gameProbByVirusCount n1 n2 r1 r2 = evalPoly poly (r1 / (r1+r2)) where
-	poly = fromMaybe (beta n1 n2) (M.lookup (n1, n2) gamePolyCache)
-
--- | Like 'gameProbByVirusCount', except it takes Dr. Mario virus levels from
--- 0-20 rather than virus counts.
-gameProbByVirusLevel :: Integer -> Integer -> Rate -> Rate -> Rate
-gameProbByVirusLevel level1 level2 = gameProbByVirusCount (4*level1 + 4) (4*level2 + 4)
-
--- | There are only a couple hundred polynomials we ever actually use. No sense
--- recomputing them a lot. This probably ought to be for internal use only.
-matchPolyCache :: Map (Integer, Integer) (Poly Rate)
-matchPolyCache = threeOutOfFive <$> gamePolyCache
-
--- | See 'matchPolyCache'.
-gamePolyCache :: Map (Integer, Integer) (Poly Rate)
-gamePolyCache = M.fromList [((n1, n2), beta n1 n2) | n1 <- [4,8..84], n2 <- [4,8..84]]
+-- | Given a handicap -- a factor by which player 2's score is multiplied --
+-- and the rates at which player 1 and player 2 score goals, compute the
+-- probability that they tie.
+tieProbability :: Rational -> Rate -> Rate -> Rate
+tieProbability handicap r1 r2 = totalWeight / normalizationFactor where
+	normalizationFactor = expRate (r1+r2)
+	spacedWeights n r = map head . chunksOf (fromInteger n) $ goalCountWeights r
+	weights1 = spacedWeights (numerator   handicap) r1
+	weights2 = spacedWeights (denominator handicap) r2
+	totalWeight = sum $ zipWith (*) weights1 weights2
