@@ -1,10 +1,12 @@
 module MCMario.Model
 	( Rate
+	, winProbability
+	, tieProbability
 	, fullPrecisionRate
 	, epsilon
 	, geometricMean
-	, winProbability
-	, tieProbability
+	, (%/)
+	, (%*)
 	) where
 
 import Data.Fixed
@@ -47,11 +49,28 @@ geometricMean rs
 	. fmap (\(MkFixed i) -> i) -- TODO: coerce?
 	$ rs
 
+-- | A version of 'div' that rounds instead of flooring.
+divRound :: Integral a => a -> a -> a
+divRound a b = div (a + div b 2) b
+
+infixl 7 %/, %*
+-- | The implementation of '(/)' in base systematically underestimates its
+-- result -- it does something akin to floor instead of round after computing
+-- the division. This function does slightly better.
+(%/) :: HasResolution a => Fixed a -> Fixed a -> Fixed a
+fa@(MkFixed a) %/ MkFixed b = MkFixed (divRound (a * resolution fa) b)
+
+-- | The implementation of '(*)' in base systematically underestimates its
+-- result -- it does something akin to floor instead of round after computing
+-- the multiplication. This function does slightly better.
+(%*) :: HasResolution a => Fixed a -> Fixed a -> Fixed a
+fa@(MkFixed a) %* MkFixed b = MkFixed (divRound (a * b) (resolution fa))
+
 -- | Given a rate at which goals are scored, compute the unnormalized weights
 -- of each possible number of goals. (Unnormalized: this computes the Poisson
 -- distribution, but without the exponential factor that makes it sum to 1.)
 goalCountWeights :: Rate -> [Rate]
-goalCountWeights r = takeWhile (>0) $ scanl (\w i -> w*r/i) 1 [1,2..]
+goalCountWeights r = takeWhile (>0) $ scanl (\w i -> w%*r%/i) 1 [1,2..]
 
 -- | Like 'exp', but actually works.
 expRate :: Rate -> Rate
@@ -61,7 +80,7 @@ expRate = sum . goalCountWeights
 -- and the rates at which player 1 and player 2 score goals, compute the
 -- probability that player 1 wins.
 winProbability :: Rational -> Rate -> Rate -> Rate
-winProbability handicap r1 r2 = totalWeight / normalizationFactor where
+winProbability handicap r1 r2 = totalWeight %/ normalizationFactor where
 	normalizationFactor = expRate (r1+r2)
 	winningScoresForPlayer1 = map (floor . (1+)) . iterate (handicap+) $ 0
 	winningScoreDeltasForPlayer1 = zipWith (-) (tail winningScoresForPlayer1) winningScoresForPlayer1
@@ -70,15 +89,15 @@ winProbability handicap r1 r2 = totalWeight / normalizationFactor where
 		. scanl (flip drop) (drop 1 $ goalCountWeights r1)
 		$ winningScoreDeltasForPlayer1
 	weights2 = goalCountWeights r2
-	totalWeight = sum . concat $ zipWith (\w1s w2 -> map (w2*) w1s) weights1 weights2
+	totalWeight = sum . concat $ zipWith (\w1s w2 -> map (w2%*) w1s) weights1 weights2
 
 -- | Given a handicap -- a factor by which player 2's score is multiplied --
 -- and the rates at which player 1 and player 2 score goals, compute the
 -- probability that they tie.
 tieProbability :: Rational -> Rate -> Rate -> Rate
-tieProbability handicap r1 r2 = totalWeight / normalizationFactor where
+tieProbability handicap r1 r2 = totalWeight %/ normalizationFactor where
 	normalizationFactor = expRate (r1+r2)
 	spacedWeights n r = map head . chunksOf (fromInteger n) $ goalCountWeights r
 	weights1 = spacedWeights (numerator   handicap) r1
 	weights2 = spacedWeights (denominator handicap) r2
-	totalWeight = sum $ zipWith (*) weights1 weights2
+	totalWeight = sum $ zipWith (%*) weights1 weights2
