@@ -1,82 +1,52 @@
 module MCMario.RatingDB
 	( RatingDB
-	, Rating
+	, Rate
 	, Confidence(..)
 	, Matchup(..)
-	, improveRatings
+	, improveComponentRatings
 	, matchup
+	, unsafeMatchup
 	) where
 
 import Control.DeepSeq
 import Data.List
 import Data.Map (Map)
 import Data.Ord
+import Data.Ratio
 import Data.Set (Set)
 import MCMario.GameDB
 import MCMario.Model
 import qualified Data.Map as M
 import qualified Data.Set as S
 
--- | Information used for choosing a handicap.
-data Rating = Rating
-	{ rate      :: Rate      -- ^ how quickly this person clears viruses compared to others in their melee
-	, melee     :: Component -- ^ a group of people who each have winning and losing paths to each other, in some canonical order; 'rate's are comparable within a 'melee', but not across 'melee's
-	, speedPref :: Speed     -- ^ a hack: precomputed most-frequent speed used by this person, stuffed in here so we don't have to figure it out afresh on each game
-	} deriving (Eq, Ord, Read, Show)
-
-instance NFData Rating where
-	rnf (Rating r m s) = rnf r `seq` rnf m `seq` rnf s
-
 -- | Information used for choosing a handicap, organized by player. This type
 -- is intended to be abstract; don't rely on it being a @Map Name Rating@.
-type RatingDB  = Map Name Rating
-type Rates     = Map Name Rate
+type RatingDB  = Map Name Rate
 type Gradients = Map Name Rate
 
--- | Use gradient ascent to improve the estimated ratings for each player from
--- their win/loss record against other players. Does a given number of steps of
--- gradient ascent.
-improveRatings :: GameDB -> RatingDB -> [RatingDB]
-improveRatings gdb rdb = id
-	. (++repeat rdb) -- funny edge case: if the GameDB is empty, there are no
-	                 -- components and we get an empty list of RatingDBs
-	                 -- instead of an infinite one
-	. map M.unions
-	. transpose
-	. map (improveComponentRatings gdb rdb)
-	. components
-	$ gdb
+-- | The rating we use by default if (perhaps by some bug) they don't have a
+-- rating when we go to look for one.
+defaultRating :: Rate
+defaultRating = 3
+
+-- | The highest score multiplier we're willing to consider.
+maxMultiplier :: Integer
+maxMultiplier = 10
+
+-- TODO: mini-batching
 
 -- | Improve the ratings for a single connected component of the game graph.
 improveComponentRatings :: GameDB -> RatingDB -> Component -> [RatingDB]
 improveComponentRatings gdb rdb ns = id
-	. map ( M.mapWithKey (\n r -> Rating r ns (preferredSpeed gdb n))
-	      . M.insert chosenName 1
-	      )
+	. map (M.unionWith (\old new -> new) rdb)
 	. gradAscend 1e-2 1.5 (componentGames gdb ns)
-	. M.union (M.restrictKeys (rate <$> rdb) otherNames)
-	. M.fromSet (const 1)
-	$ otherNames
-	where
-	(chosenName, otherNames) = S.deleteFindMin ns
-
-preferredSpeed :: GameDB -> Name -> Speed
-preferredSpeed db n = id
-	. fst
-	. head
-	. sortBy (comparing (negate . snd))
-	. ((Medium,0):) -- so that there is always at least one entry
-	. M.toList
-	. M.fromListWith (+)
-	$ [ (speed settings, 1)
-	  | r <- playerGames db n
-	  , settings <- [winner r, loser r]
-	  , name settings == n
-	  ]
+	. M.union (M.restrictKeys rdb ns)
+	. M.fromSet (const defaultRating)
+	$ ns
 
 -- | Set somebody's rate. Does some minor sanity checking to make sure the rate
 -- is positive.
-setRate :: Name -> Rate -> Rates -> Rates
+setRate :: Name -> Rate -> RatingDB -> RatingDB
 setRate n = M.insert n . max epsilon
 
 -- | Ideally, we'd like to maximize the likelihood of the game records we've
@@ -91,19 +61,21 @@ setRate n = M.insert n . max epsilon
 -- don't arbitrarily drop all the precision we have when converting to
 -- 'Double'; we convert to 'Double' because 'Rate' doesn't support 'log'.
 --
--- Any player with no 'Rate' is given a 'Rate' of 1.
-objective :: [GameRecord] -> Rates -> Double
+-- Any player with no 'Rate' is given some sensible default.
+objective :: [GameRecord] -> RatingDB -> Double
+-- TODO: perhaps it is safe not to divide by the length...?
 objective gs rs = sum (map gameObjective gs) / genericLength gs where
 	gameObjective g = log (fromInteger v) where
-		l1 = level (winner g)
-		l2 = level (loser  g)
-		r1 = M.findWithDefault 1 (name (winner g)) rs
-		r2 = M.findWithDefault 1 (name (loser  g)) rs
-		v  = fullPrecisionRate . clipProb $ matchProbByVirusLevel l1 l2 r1 r2
+		rBlue   = teamRating (blue   g)
+		rOrange = teamRating (orange g)
+		v = fullPrecisionRate . clipProb
+		  $ gameProbability (winner g) (handicap g) rBlue rOrange
 
 	-- log 0 is -Infinity, that's right out
 	-- log 1 is perfectly fine, but let's avoid it anyway for symmetry
 	clipProb = min (1-epsilon) . max epsilon
+	playerRating n = M.findWithDefault defaultRating n rs
+	teamRating = sum . map playerRating . S.toList
 
 -- TODO: Currently, when finding the gradient at player X, we compute the
 -- objective function over all games in X's component. But actually the
@@ -114,18 +86,18 @@ objective gs rs = sum (map gameObjective gs) / genericLength gs where
 -- for each player and each iteration of gradient ascent.
 
 -- | Find the approximate gradient of the objective function numerically.
-numericGradient :: [GameRecord] -> Rates -> Gradients
+numericGradient :: [GameRecord] -> RatingDB -> Gradients
 numericGradient gs rs = M.mapWithKey numGradAt rs where
-	numGradAt n r = realToFrac (f hi - f lo) / (hi - lo) where
+	numGradAt n r = realToFrac (f hi - f lo) %/ (hi - lo) where
 		f x = objective gs (setRate n x rs)
-		hi = r * 1.00001
-		lo = r / 1.00001
+		hi = r %* 1.00001
+		lo = r %/ 1.00001
 
 -- TODO: This adjustmentFactor stuff is assuming everything is positive; should
 -- be bother being worried about that? Currently:
 -- 1. The adjustmentFactor is a constant, chosen by the caller, and our only
 --    caller chooses a positive constant.
--- 2. The default rating is 1, which is positive.
+-- 2. The 'defaultRating' is positive.
 -- 3. Having a rating switch sign is not sane.
 -- So I think it's okay for now. But if any of the above assumptions get
 -- invalidated in the future we might be in trouble!
@@ -137,16 +109,16 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 -- this factor of its previous value.
 --
 -- The learning parameter and adjustment factor are assumed to be positive.
-gradAscendStep :: Rate -> Rate -> [GameRecord] -> Rates -> Rates
+gradAscendStep :: Rate -> Rate -> [GameRecord] -> RatingDB -> RatingDB
 gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
-	(\v dv -> clip v (v + dv*learningRate))
+	(\v dv -> clip v (v + dv%*learningRate))
 	rs
 	(numericGradient gs rs)
 	where
 	clip v = id
 		. max epsilon
-		. max (v/adjustmentFactor)
-		. min (v*adjustmentFactor)
+		. max (v%/adjustmentFactor)
+		. min (v%*adjustmentFactor)
 
 -- TODO: look into using SBV's SReal for the optimization problem here
 
@@ -158,7 +130,7 @@ gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
 -- this factor of its previous value.
 --
 -- The learning parameter and adjustment factor are assumed to be positive.
-gradAscend :: Rate -> Rate -> [GameRecord] -> Rates -> [Rates]
+gradAscend :: Rate -> Rate -> [GameRecord] -> RatingDB -> [RatingDB]
 gradAscend learningRate adjustmentFactor gs rs
 	= iterate (gradAscendStep learningRate adjustmentFactor gs) rs
 
@@ -166,112 +138,122 @@ gradAscend learningRate adjustmentFactor gs rs
 -- parameters, at least. Worth trying.
 
 -- | We will try to suggest a matchup for any pair of players. But if the
--- players are not in the same 'melee', then we can't really be sure about what
--- settings would be good, and we just use a heuristic to make a guess. This
--- type is for reporting whether we used a heuristic or a principled way of
--- arriving at a given matchup.
+-- players are not in the same 'Component', then we can't really be sure about
+-- what settings would be good, and we just use a heuristic to make a guess.
+-- This type is for reporting whether we used a heuristic or a principled way
+-- of arriving at a given matchup.
 data Confidence = Provisional | Confident deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
 -- | A recommendation about what settings two players should choose, along with
 -- backup plans for level settings if they want longer/shorter games than the
 -- most fair possible settings would give them.
 data Matchup = Matchup
-	{ left, right :: PlayerSettings
+	{ left, right :: Integer
 	, leftToRight, rightToLeft :: Map Integer Integer
 	, confidence :: Confidence
 	} deriving (Eq, Ord, Read, Show)
 
 -- | Suggest player settings, using some combination of precomputed information
 -- in the 'RatingDB' given and manual queries to the 'GameDB' given.
-matchup :: GameDB -> RatingDB -> Name -> Name -> Matchup
-matchup games ratings lName rName
-	| lMelee == rMelee = confident   $ unsafeMatchup lName lRating  rName rRating
-	| otherwise        = provisional $ unsafeMatchup lName lRating' rName rRating'
+matchup :: GameDB -> RatingDB -> Set Name -> Set Name -> Matchup
+matchup games ratings lNames rNames = case S.lookupMin lNames >>= flip M.lookup componentMap of
+	Just component | allNames `S.isSubsetOf` component
+	  -> confident   $ unsafeMatchup lRating  rRating
+	_ -> provisional $ unsafeMatchup lRating' rRating'
 	where
-	defRating n = Rating 1 (S.singleton n) Medium
-	lRating = M.findWithDefault (defRating lName) lName ratings
-	rRating = M.findWithDefault (defRating rName) rName ratings
-	lMelee = melee lRating
-	rMelee = melee rRating
+	allNames = S.union lNames rNames
+	componentMap = M.unions [M.fromSet (const c) c | c <- components games]
+	lRating = totalRating lNames
+	rRating = totalRating rNames
 	confident   m = m { confidence = Confident   }
 	provisional m = m { confidence = Provisional }
+	totalRating = id
+		. sum
+		. map (\name -> M.findWithDefault defaultRating name ratings)
+		. S.toList
 
-	-- Heuristic: normalize rates by dividing by the melee's (geometric)
-	-- average rate. Then, if there are any games between players in the two
-	-- melees, boost the winning melee's player's rating by 30% for each game.
-	-- (This way if two players play each other while not being in the same
-	-- melee, winning repeatedly will still change the handicap.)
-	(lWinEdges, rWinEdges) = partition (\r -> name (winner r) `S.member` lMelee)
-	                       $ edgesBetween games lMelee rMelee
-	meanRate name rating melee = id
-		. geometricMean
-		. fmap rate
-		. M.insert name rating -- in case M.findWithDefault had to use the default
-		$ ratings `M.restrictKeys` melee
-	lMeanRate = meanRate lName lRating lMelee
-	rMeanRate = meanRate rName rRating rMelee
-	lRating' = lRating { rate = rate lRating / lMeanRate * 1.3^length lWinEdges }
-	rRating' = rRating { rate = rate rRating / rMeanRate * 1.3^length rWinEdges }
+	-- Heuristic: normalize rates by dividing by each player's component's (geometric)
+	-- average rating. Then count how many games involve players on one team
+	-- beating players on the other team, boosting the appropriate team's
+	-- rating by 30% for each. (This way if players play each other while not
+	-- being in the same melee, winning repeatedly will still change the
+	-- handicap.)
+	lWinEdges = edgesBetween games lNames rNames
+	rWinEdges = edgesBetween games rNames lNames
+	meanRating name = case M.lookup name componentMap of
+		Just component -> geometricMean (ratings `M.restrictKeys` component)
+		Nothing -> defaultRating
+	normalizedTotalRating names = sum
+		[ M.findWithDefault defaultRating name ratings %/ meanRating name
+		| name <- S.toList names
+		]
+	lNormalizedRating = normalizedTotalRating lNames
+	rNormalizedRating = normalizedTotalRating rNames
+	lRating' = normalizedTotalRating lNames %* 1.3^length lWinEdges
+	rRating' = normalizedTotalRating rNames %* 1.3^length rWinEdges
 
--- | Internal use only. Given some names and ratings, produce a matchup. Unsafe for two reasons:
---
--- 1. Completely ignores the 'melee' of the two ratings. If the 'rate's aren't
--- comparable, you'll get garbage outputs.
--- 2. Doesn't set the 'confidence' of the output.
-unsafeMatchup :: Name -> Rating -> Name -> Rating -> Matchup
-unsafeMatchup lName lRating rName rRating = Matchup
-	{ left = PlayerSettings
-		{ name  = lName
-		, level = lLevel
-		, speed = speedPref lRating
-		}
-	, right = PlayerSettings
-		{ name  = rName
-		, level = rLevel
-		, speed = speedPref rRating
-		}
+-- | Internal use only. Given some ratings, produce a matchup. It's on you to
+-- make sure the ratings can be sensibly compared (i.e. are from the same
+-- 'Component'). Unsafe because it doesn't set the 'confidence' of the output.
+unsafeMatchup :: Rate -> Rate -> Matchup
+unsafeMatchup lRating rRating = Matchup
+	{ left  = numerator   ratio
+	, right = denominator ratio
 	, leftToRight = M.fromAscList $ map (fmap fst) lToR
 	, rightToLeft = M.fromAscList $ map (fmap fst) rToL
 	, confidence = error "drat, somebody forgot to fix up the confidence field after calling unsafeMatchup"
 	}
 	where
-	-- TODO: think about a less ad-hoc way of choosing (7,7); perhaps a simple
-	-- cost model that penalizes "extreme" matchups like 0/0 or 20/20
-	(lLevel, (rLevel, _))
-		| rate lRating == rate rRating = (7, (7, error "wow, observing this seems especially impossible"))
-		| otherwise = minimumBy (comparing (abs . (0.5-) . snd . snd)) lToR
-	lToR = [(level, bestMatch (rate lRating) (rate rRating) level) | level <- [0..20]]
-	rToL = [(level, bestMatch (rate rRating) (rate lRating) level) | level <- [0..20]]
+	ratio = lMultiplier % rMultiplier
+	(lMultiplier, (rMultiplier, _)) = maximumBy (comparing (normalizeQuality . snd . snd)) lToR
+	lToR = [(multiplier, bestMatch lRating rRating multiplier) | multiplier <- [1..maxMultiplier]]
+	rToL = [(multiplier, bestMatch lRating rRating multiplier) | multiplier <- [1..maxMultiplier]]
 
--- | If @bestMatch r1 r2 level1 = (level2, prob)@, then
+-- | If @bestMatch r1 r2 multiplier1 = (multiplier2, quality)@, then
 --
--- * 0 <= @level2@ <= 20
--- * the win ratio for a player clearing viruses at rate @r1@ on level @level1@
---   vs. a player clearing viruses at rate @r2@ on level @level2@ is as close to
---   50% as possible
--- * @prob@ is the probability of player 1 winning each round of the match
+-- * 1 <= @multiplier2@ <= @maxMultiplier@
+-- * the win-loss ratio for a player making goals worth @multiplier1@ points
+--   each at rate @r1@ vs a player making goals worth @multiplier2@ points each
+--   at rate @r2@ is as close to 1 as possible
+-- * @quality@ is the win-loss ratio for player 1
 bestMatch :: Rate -> Rate -> Integer -> (Integer, Rate)
-bestMatch r1 r2 level1 = case gameProbByVirusLevel level1 guess r1 r2 of
-	p | p <= 0.5  -> searchUp   guess p
+bestMatch r1 r2 multiplier1 = case quality r1 r2 (guess % multiplier1) of
+	p | p > 1     -> searchUp   guess p
 	  | otherwise -> searchDown guess p
 	where
-	clip = max 0 . min 20
-	guess = clip (floor (r2 * (fromInteger (level1 + 1)) / r1) - 1)
+	clip = max 1 . min maxMultiplier
+	guess = clip . floor $ r1 %* fromInteger multiplier1 %/ r2
 
-	searchUp 20 p = (20, p)
-	searchUp guess p = case gameProbByVirusLevel level1 (guess+1) r1 r2 of
-		p' | p' <= 0.5 -> searchUp (guess+1) p'
-		   | otherwise -> if p'-0.5 > 0.5-p then (guess, p) else (guess+1, p')
+	searchUp guess p | guess == maxMultiplier = (guess, p)
+	searchUp guess p = case quality r1 r2 ((guess+1) % multiplier1) of
+		p' | p' > 1    -> searchUp (guess+1) p'
+		   | otherwise -> if normalizeQuality p > normalizeQuality p'
+		   	then (guess, p)
+		   	else (guess+1, p')
 
-	searchDown 0 p = (0, p)
-	searchDown guess p = case gameProbByVirusLevel level1 (guess-1) r1 r2 of
-		p' | p' > 0.5 -> searchDown (guess-1) p'
-		   | otherwise -> if 0.5-p' > p-0.5 then (guess, p) else (guess-1, p')
+	searchDown 1 p = (1, p)
+	searchDown guess p = case quality r1 r2 ((guess-1) % multiplier1) of
+		p' | p' <= 1  -> searchDown (guess-1) p'
+		   | otherwise -> if normalizeQuality p > normalizeQuality p'
+		   	then (guess, p)
+		   	else (guess-1, p')
 
 -- | Same behavior as 'bestMatch', but implemented in an obviously correct way.
 -- Good for testing correctness of 'bestMatch'.
 bestMatchSlow :: Rate -> Rate -> Integer -> (Integer, Rate)
-bestMatchSlow r1 r2 level1 = id
-	. minimumBy (\(_, p) (_, p') -> compare (abs (p-0.5)) (abs (p'-0.5)))
-	. map (\level2 -> (level2, gameProbByVirusLevel level1 level2 r1 r2))
-	$ [0..20]
+bestMatchSlow r1 r2 multiplier1 = id
+	. maximumBy (comparing (normalizeQuality.snd))
+	. map (\multiplier2 -> (multiplier2, quality r1 r2 (multiplier2 % multiplier1)))
+	$ [1..maxMultiplier]
+
+normalizeQuality :: Rate -> Rate
+normalizeQuality p | p > 1 = 1/p | otherwise = p
+
+quality :: Rate -> Rate -> Rational -> Rate
+quality r1 r2 handicap = win %/ lose where
+	-- The win and loss probabilities cost about the same to compute, but the
+	-- tie probability is much cheaper. So if we have to compute two
+	-- probabilities, we want one of them to be the tie probability.
+	win = gameProbability Blue handicap r1 r2
+	tie = gameProbability Tie  handicap r1 r2
+	lose = 1-win-tie

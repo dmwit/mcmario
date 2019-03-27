@@ -1,7 +1,6 @@
 module MCMario.Model
 	( Rate
-	, winProbability
-	, tieProbability
+	, gameProbability
 	, fullPrecisionRate
 	, epsilon
 	, geometricMean
@@ -13,6 +12,7 @@ import Data.Fixed
 import Data.List.Split
 import Data.Ratio
 import Math.NumberTheory.Powers.General
+import MCMario.GameDB
 
 -- | For numbers stored as multiples of 1e-100.
 data E100
@@ -76,28 +76,59 @@ goalCountWeights r = takeWhile (>0) $ scanl (\w i -> w%*r%/i) 1 [1,2..]
 expRate :: Rate -> Rate
 expRate = sum . goalCountWeights
 
--- | Given a handicap -- a factor by which player 2's score is multiplied --
--- and the rates at which player 1 and player 2 score goals, compute the
--- probability that player 1 wins.
+-- | Given a handicap -- a factor by which orange's score is multiplied -- and
+-- the rates at which blue and orange score goals, compute the probability that
+-- blue wins.
 winProbability :: Rational -> Rate -> Rate -> Rate
-winProbability handicap r1 r2 = totalWeight %/ normalizationFactor where
-	normalizationFactor = expRate (r1+r2)
-	winningScoresForPlayer1 = map (floor . (1+)) . iterate (handicap+) $ 0
-	winningScoreDeltasForPlayer1 = zipWith (-) (tail winningScoresForPlayer1) winningScoresForPlayer1
-	weights1 = id
+winProbability handicap rBlue rOrange = totalWeight %/ normalizationFactor where
+	normalizationFactor = expRate (rBlue+rOrange)
+	winningScoresForBlue = map (floor . (1+)) . iterate (handicap+) $ 0
+	winningScoreDeltasForBlue = zipWith (-) (tail winningScoresForBlue) winningScoresForBlue
+	weightsBlue = id
 		. takeWhile (not . null)
-		. scanl (flip drop) (drop 1 $ goalCountWeights r1)
-		$ winningScoreDeltasForPlayer1
-	weights2 = goalCountWeights r2
-	totalWeight = sum . concat $ zipWith (\w1s w2 -> map (w2%*) w1s) weights1 weights2
+		. scanl (flip drop) (drop 1 $ goalCountWeights rBlue)
+		$ winningScoreDeltasForBlue
+	weightsOrange = goalCountWeights rOrange
+	totalWeight = sum . concat $ zipWith (\wsBlue wOrange -> map (wOrange%*) wsBlue) weightsBlue weightsOrange
 
--- | Given a handicap -- a factor by which player 2's score is multiplied --
--- and the rates at which player 1 and player 2 score goals, compute the
--- probability that they tie.
+-- | Given a handicap -- a factor by which orange's score is multiplied -- and
+-- the rates at which blue and orange score goals, compute the probability that
+-- they tie.
 tieProbability :: Rational -> Rate -> Rate -> Rate
-tieProbability handicap r1 r2 = totalWeight %/ normalizationFactor where
-	normalizationFactor = expRate (r1+r2)
+tieProbability handicap rBlue rOrange = totalWeight %/ normalizationFactor where
+	normalizationFactor = expRate (rBlue+rOrange)
 	spacedWeights n r = map head . chunksOf (fromInteger n) $ goalCountWeights r
-	weights1 = spacedWeights (numerator   handicap) r1
-	weights2 = spacedWeights (denominator handicap) r2
-	totalWeight = sum $ zipWith (%*) weights1 weights2
+	weightsBlue   = spacedWeights (numerator   handicap) rBlue
+	weightsOrange = spacedWeights (denominator handicap) rOrange
+	totalWeight = sum $ zipWith (%*) weightsBlue weightsOrange
+
+-- TODO: This has an odd behavior, I think. Namely: it penalizes players who
+-- choose to participate in team games for tying the game. Since we add the
+-- rates of the players on the teams, this drastically reduces the probability
+-- of a tie; so this model probably underestimates the probability of
+-- well-composed teams tying. (Even teams of absolutely top-notch players tie,
+-- just think of how many of the videos you've watched on YouTube of pro
+-- players end up going into overtime.)
+--
+-- Perhaps we can fix this by shifting the interpretation of the rate from
+-- being a rate of goals to a rate of shots, and adding a parameter to each
+-- player for the probability that any given shot makes it into net. This way,
+-- teams would have higher shot rates, yes, but they'd also have lower chances
+-- of letting shots into goal, and ties would become likely again. To avoid
+-- being able to inflate these indefinitely without changing predictions, we
+-- can clip the shot success rate parameter to being between 0 and 1 (well,
+-- epsilon and 1-epsilon, probably).
+--
+-- How to compose parameters on a team? Shot rates add as before. For shot
+-- success rates, I think it makes sense to allow a shot to score if everybody
+-- on the other team gets a chance to block and fails. So the success rates
+-- multiply.
+
+-- | Given the handicap -- a factor by which orange's score is multiplied --
+-- and the rates at which the blue team and orange team score goals, compute
+-- the probability of the given game outcome.
+gameProbability :: Winner -> Rational -> Rate -> Rate -> Rate
+gameProbability w handicap rBlue rOrange = case w of
+	Blue   -> winProbability handicap rBlue rOrange
+	Tie    -> tieProbability handicap rBlue rOrange
+	Orange -> winProbability (recip handicap) rOrange rBlue

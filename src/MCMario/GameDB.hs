@@ -160,8 +160,20 @@ componentGames db ns = filter
 	(\g -> S.isSubsetOf (blue g) ns && S.isSubsetOf (orange g) ns)
 	(laxComponentGames db ns)
 
--- | Find edges from one component to another (in either direction).
-edgesBetween :: GameDB -> Component -> Component -> [GameRecord]
-edgesBetween db ns ns' = filter
-	(\g -> winner g /= Tie)
-	(laxComponentGames db (ns `S.union` ns'))
+-- | Find games where the winners are all drawn from the first set, and the
+-- losers all drawn from the second.
+edgesBetween :: GameDB -> Set Name -> Set Name -> [GameRecord]
+edgesBetween db ns ns' =
+	[ game
+	| gameNode <- IS.toList . IS.fromList $
+		[ gameNode
+		| n <- S.toList ns
+		, Just playerNode <- [M.lookup n (nodes db)]
+		, gameNode <- G.suc (games db) playerNode
+		]
+	, Just (Right game) <- [G.lab (games db) gameNode]
+	, case winner game of
+		Blue   -> blue   game `S.isSubsetOf` ns && orange game `S.isSubsetOf` ns'
+		Tie    -> False
+		Orange -> orange game `S.isSubsetOf` ns && blue   game `S.isSubsetOf` ns'
+	]
