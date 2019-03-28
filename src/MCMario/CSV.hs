@@ -11,8 +11,11 @@ import Data.Csv
 	)
 import Data.Default
 import Data.Monoid
+import Data.Ratio
+import Data.Set (Set)
 import Data.String
 import Data.Time
+import Data.Vector (Vector)
 import MCMario.GameDB
 import MCMario.RatingDB
 import System.Exit
@@ -22,51 +25,49 @@ import Text.Read
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Csv as CSV
+import qualified Data.Set as S
+import qualified Data.Vector as V
 
 instance ToNamedRecord GameRecord where
 	toNamedRecord r = CSV.namedRecord
-		[ fromString "winner-name"  CSV..= name  (winner r)
-		, fromString "winner-level" CSV..= level (winner r)
-		, fromString "winner-speed" CSV..= speed (winner r)
-		, fromString "loser-name"   CSV..= name  (loser  r)
-		, fromString "loser-level"  CSV..= level (loser  r)
-		, fromString "loser-speed"  CSV..= speed (loser  r)
-		, fromString "time"         CSV..= date r
+		[ fromString "blue-names"        CSV..= blue r
+		, fromString "blue-multiplier"   CSV..= denominator (handicap r)
+		, fromString "orange-names"      CSV..= orange r
+		, fromString "orange-multiplier" CSV..= numerator (handicap r)
+		, fromString "winner"            CSV..= winner r
+		, fromString "time"              CSV..= date r
 		]
 
 instance DefaultOrdered GameRecord where
 	headerOrder _ = CSV.header
-		[ fromString "winner-name"
-		, fromString "winner-level"
-		, fromString "winner-speed"
-		, fromString "loser-name"
-		, fromString "loser-level"
-		, fromString "loser-speed"
+		[ fromString "blue-names"
+		, fromString "blue-multiplier"
+		, fromString "orange-names"
+		, fromString "orange-multiplier"
+		, fromString "winner"
 		, fromString "time"
 		]
 
 instance FromNamedRecord GameRecord where
-	parseNamedRecord m = go where
-		go = liftA3 GameRecord
-			(parseSettings "winner")
-			(parseSettings "loser")
-			(m CSV..: fromString "time")
-		parseSettings prefix = liftA3 PlayerSettings
-			(m CSV..: fromString (prefix <> "-name"))
-			(m CSV..: fromString (prefix <> "-level"))
-			(m CSV..: fromString (prefix <> "-speed"))
+	parseNamedRecord m = pure GameRecord
+		<*> (m CSV..: fromString   "blue-names")
+		<*> (m CSV..: fromString "orange-names")
+		<*> liftA2 (%) (m CSV..: fromString "orange-multiplier")
+		               (m CSV..: fromString   "blue-multiplier")
+		<*> (m CSV..: fromString "winner")
+		<*> (m CSV..: fromString "time")
 
-instance ToField Speed where
-	toField High   = fromString "HI"
-	toField Medium = fromString "MED"
-	toField Low    = fromString "LOW"
+instance ToField Winner where
+	toField Blue   = fromString "blue"
+	toField Tie    = fromString "tie"
+	toField Orange = fromString "orange"
 
-instance FromField Speed where
+instance FromField Winner where
 	parseField bs
-		| bs == fromString "HI"  = pure High
-		| bs == fromString "MED" = pure Medium
-		| bs == fromString "LOW" = pure Low
-		| otherwise = fail "expected HI, MED, or LOW"
+		| bs == fromString "blue"   = pure Blue
+		| bs == fromString "tie"    = pure Tie
+		| bs == fromString "orange" = pure Orange
+		| otherwise = fail "expected blue, tie, or orange"
 
 instance ToField UTCTime where toField = fromString . show
 
@@ -74,6 +75,16 @@ instance FromField UTCTime where
 	parseField bs = case readMaybe (BS.unpack bs) of
 		Just t  -> pure t
 		Nothing -> fail "expected a date"
+
+instance ToField a => ToField (Set a) where
+	toField s = LBS.toStrict $ CSV.encode [S.toList s]
+
+instance (Ord a, FromField a) => FromField (Set a) where
+	parseField bs = case CSV.decode CSV.NoHeader $ LBS.fromChunks [bs] of
+		Right v -> case V.length v of
+			1 -> pure . S.fromList $ v V.! 0
+			n -> fail $ "expected exactly one row of CSV, found " ++ show n
+		Left err -> fail err
 
 instance Default EncodeOptions where def = CSV.defaultEncodeOptions
 
