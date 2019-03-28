@@ -1,4 +1,4 @@
-module MCMario.CSV (load, save) where
+module MCMario.CSV (loadGames, saveGames, loadRatings, saveRatings) where
 
 import Control.Applicative
 import Data.Csv
@@ -10,6 +10,7 @@ import Data.Csv
 	, ToNamedRecord
 	)
 import Data.Default
+import Data.Fixed
 import Data.Monoid
 import Data.Ratio
 import Data.Set (Set)
@@ -17,6 +18,7 @@ import Data.String
 import Data.Time
 import Data.Vector (Vector)
 import MCMario.GameDB
+import MCMario.Model
 import MCMario.RatingDB
 import System.Exit
 import System.Posix.Files
@@ -25,6 +27,7 @@ import Text.Read
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Csv as CSV
+import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Vector as V
 
@@ -88,18 +91,63 @@ instance (Ord a, FromField a) => FromField (Set a) where
 
 instance Default EncodeOptions where def = CSV.defaultEncodeOptions
 
-load :: FilePath -> IO GameDB
-load filename = do
+loadGames :: FilePath -> IO GameDB
+loadGames filename = do
 	bs <- LBS.readFile filename
 	case CSV.decodeByName bs of
 		Left err -> die err
 		Right (_, gs) -> return (foldr addGame def gs)
 
-save :: FilePath -> GameDB -> IO ()
-save filename gdb = do
+saveGames :: FilePath -> GameDB -> IO ()
+saveGames filename gdb = do
 	LBS.writeFile
 		(filename <> ".new")
 		(CSV.encodeByNameWith def header (listGames gdb))
 	rename (filename <> ".new") filename
 	where
 	header = CSV.headerOrder (undefined :: GameRecord)
+
+newtype RatingEntry = RatingEntry (Name, Rate)
+	deriving (Eq, Ord, Read, Show)
+
+instance ToNamedRecord RatingEntry where
+	toNamedRecord (RatingEntry (n, r)) = CSV.namedRecord
+		[ fromString "name"   CSV..= n
+		, fromString "rating" CSV..= r
+		]
+
+instance DefaultOrdered RatingEntry where
+	headerOrder _ = CSV.header
+		[ fromString "name"
+		, fromString "rating"
+		]
+
+instance FromNamedRecord RatingEntry where
+	parseNamedRecord m = pure (\n r -> RatingEntry (n,r))
+		<*> (m CSV..: fromString "name")
+		<*> (m CSV..: fromString "rating")
+
+instance HasResolution a => ToField (Fixed a) where toField = fromString . show
+
+instance HasResolution a => FromField (Fixed a) where
+	parseField bs = case readMaybe (BS.unpack bs) of
+		Just t -> pure t
+		Nothing -> fail "expected a rating"
+
+loadRatings :: FilePath -> IO RatingDB
+loadRatings filename = do
+	bs <- LBS.readFile filename
+	case CSV.decodeByName bs of
+		Left err -> die err
+		Right (_, rs) -> return . M.fromList . map unRatingEntry . V.toList $ rs
+	where
+	unRatingEntry (RatingEntry (n, r)) = (n, max epsilon r)
+
+saveRatings :: FilePath -> RatingDB -> IO ()
+saveRatings filename rdb = do
+	LBS.writeFile
+		(filename <> ".new")
+		(CSV.encodeByNameWith def header (map RatingEntry $ M.toList rdb))
+	rename (filename <> ".new") filename
+	where
+	header = CSV.headerOrder (undefined :: RatingEntry)
