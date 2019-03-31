@@ -11,6 +11,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Csv (FromField, parseField, runParser)
 import Data.Default
 import Data.Either
 import Data.Foldable
@@ -179,6 +180,13 @@ ratingsUpdateThread ctxt = forever $ do
 listPlayersJSON :: Context -> Snap ()
 listPlayersJSON ctxt = writeJSON . listPlayers =<< loadGamesCtxt' ctxt
 
+requireFieldParam :: (MonadSnap m, FromField a) => BS.ByteString -> m a
+requireFieldParam label = do
+	bs <- getParam label
+	case runParser . parseField <$> bs of
+		Just (Right v) -> return v
+		_ -> pass
+
 requireUtf8Param :: MonadSnap m => BS.ByteString -> m Text
 requireUtf8Param label = do
 	bs <- getParam label
@@ -208,9 +216,9 @@ matchupJSON ctxt = do
 
 addGamePost :: Context -> Snap ()
 addGamePost ctxt = do
-	blue   <- requireJSONParam (fromString   "blue")
-	orange <- requireJSONParam (fromString "orange")
-	winner <- requireJSONParam (fromString "winner")
+	blue   <- requireUtf8Param (fromString   "blue")
+	orange <- requireUtf8Param (fromString "orange")
+	winner <- requireFieldParam (fromString "winner")
 	num    <- requireJSONParam (fromString "orange-multiplier")
 	den    <- requireJSONParam (fromString   "blue-multiplier")
 	now <- liftIO getCurrentTime

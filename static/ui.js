@@ -85,30 +85,25 @@ function clearPlayer(ev) {
 }
 
 function clearSelectors() {
-	$(".player .speed option[value=Low]").prop("selected", true);
 	$(".player .level").prop("value", "");
 	$("#sync").prop("checked", false);
 	$("#game-record-error-box").addClass("hidden");
 }
 
 function disableSelectors() {
-	$(".player .speed").prop("disabled", true);
 	$(".player .level").prop("disabled", true);
 	$("#sync").prop("disabled", true);
 }
 
 function enableSelectors() {
-	$(".player .speed").prop("disabled", false);
 	$(".player .level").prop("disabled", false);
 	$("#sync").prop("disabled", false);
 }
 
 function setMatchup(data, result, jqxhr) {
 	if(jqxhr !== mostRecentMatchup) return;
-	$("#left  .speed option[value=" + data.left .speed + "]").prop("selected", true);
-	$("#right .speed option[value=" + data.right.speed + "]").prop("selected", true);
-	$("#left  .level").prop("value", data.left .level);
-	$("#right .level").prop("value", data.right.level);
+	$("#left  .level").prop("value", data.left );
+	$("#right .level").prop("value", data.right);
 	$("#sync").prop("checked", data.confidence === "Confident");
 	levelMap["left" ] = data.leftToRight;
 	levelMap["right"] = data.rightToLeft;
@@ -132,11 +127,14 @@ function recordGame(ev) {
 	disableSelectors();
 	$(".clear").addClass("disabled");
 
-	var winner = ev.data, loser = otherSide(winner);
 	var postData =
-		{ winner: JSON.stringify(playerSettings(winner))
-		, loser : JSON.stringify(playerSettings(loser ))
+		{   "blue"           : $("#left  .name").text()
+		, "orange"           : $("#right .name").text()
+		,   "blue-multiplier": $("#left  .level").prop("value")
+		, "orange-multiplier": $("#right .level").prop("value")
 		};
+	if(ev.data === "left") postData.winner = "blue";
+	else postData.winner = "orange";
 	// TODO: why are we getting an XML parsing error every time we record a game?
 	$.post("/game", postData, gameRecorded, "text").fail(gameNotRecorded);
 }
@@ -156,17 +154,6 @@ function gameNotRecorded() {
 	enableSelectors();
 	$(".clear").removeClass("disabled");
 	$("#game-record-error-box").removeClass("hidden");
-}
-
-function playerSettings(side) {
-	// not just return { ... } because the semicolon insertion algorithm gets
-	// it wrong
-	var result =
-		{ name:           $("#" + side + " .name" ).text()
-		, level: parseInt($("#" + side + " .level").prop("value"))
-		, speed:          $("#" + side + " .speed").prop("value")
-		};
-	return result;
 }
 
 function otherSide(here) { return (here === "left") ? "right" : "left"; }
