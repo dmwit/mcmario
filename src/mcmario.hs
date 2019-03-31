@@ -177,8 +177,7 @@ ratingsUpdateThread ctxt = forever $ do
 						else Just (name, iterations-iterationsPerSTMUpdate)
 
 listPlayersJSON :: Context -> Snap ()
-listPlayersJSON ctxt = ifTop $
-	writeJSON . listPlayers =<< loadGamesCtxt' ctxt
+listPlayersJSON ctxt = writeJSON . listPlayers =<< loadGamesCtxt' ctxt
 
 requireUtf8Param :: MonadSnap m => BS.ByteString -> m Text
 requireUtf8Param label = do
@@ -290,17 +289,17 @@ main = do
 	forkIO (ratingsUpdateThread ctxt)
 	httpServe (fPort mempty) . asum $
 		[ method GET . route $
-			[ (fromString "players", listPlayersJSON ctxt)
-			, (fromString "matchup/:left/:right", matchupJSON ctxt)
-			, (fromString "debug.txt", debug ctxt)
+			[ (fromString "players", ifTop $ listPlayersJSON ctxt)
+			, (fromString "matchup/:left/:right", ifTop $ matchupJSON ctxt)
+			, (fromString "debug.txt", ifTop $ debug ctxt)
 			-- the endpoints for the next two are always games.csv and
 			-- ratings.csv, no matter what actual database filename is being
 			-- used
-			, (fromString "games.csv", gamesCSV ctxt)
-			, (fromString "ratings.csv", ratingsCSV ctxt)
+			, (fromString "games.csv", ifTop $ gamesCSV ctxt)
+			, (fromString "ratings.csv", ifTop $ ratingsCSV ctxt)
 			]
 		, method POST . route $
-			[ (fromString "game", addGamePost ctxt)
+			[ (fromString "game", ifTop $ addGamePost ctxt)
 			]
 		, serveDirectory "static"
 		]
