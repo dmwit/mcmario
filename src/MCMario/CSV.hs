@@ -1,6 +1,7 @@
 module MCMario.CSV (loadGames, saveGames, loadRatings, saveRatings) where
 
 import Control.Applicative
+import Control.Exception
 import Data.Csv
 	( DefaultOrdered
 	, EncodeOptions
@@ -22,6 +23,7 @@ import MCMario.Model
 import MCMario.RatingDB
 import System.Exit
 import System.Posix.Files
+import System.IO.Error
 import Text.Read
 
 import qualified Data.ByteString.Char8 as BS
@@ -91,12 +93,17 @@ instance (Ord a, FromField a) => FromField (Set a) where
 
 instance Default EncodeOptions where def = CSV.defaultEncodeOptions
 
-loadGames :: FilePath -> IO GameDB
-loadGames filename = do
+missingFileIsDef :: Default a => IOError -> IO (Either String a)
+missingFileIsDef e
+	| isDoesNotExistError e = return (Right def)
+	| otherwise = throwIO e
+
+loadGames :: FilePath -> IO (Either String GameDB)
+loadGames filename = flip catch missingFileIsDef $ do
 	bs <- LBS.readFile filename
 	case CSV.decodeByName bs of
-		Left err -> die err
-		Right (_, gs) -> return (foldr addGame def gs)
+		Left err -> return (Left err)
+		Right (_, gs) -> return (Right (foldr addGame def gs))
 
 saveGames :: FilePath -> GameDB -> IO ()
 saveGames filename gdb = do
@@ -134,12 +141,12 @@ instance HasResolution a => FromField (Fixed a) where
 		Just t -> pure t
 		Nothing -> fail "expected a rating"
 
-loadRatings :: FilePath -> IO RatingDB
-loadRatings filename = do
+loadRatings :: FilePath -> IO (Either String RatingDB)
+loadRatings filename = flip catch missingFileIsDef $ do
 	bs <- LBS.readFile filename
 	case CSV.decodeByName bs of
-		Left err -> die err
-		Right (_, rs) -> return . M.fromList . map unRatingEntry . V.toList $ rs
+		Left err -> return (Left err)
+		Right (_, rs) -> return . Right . M.fromList . map unRatingEntry . V.toList $ rs
 	where
 	unRatingEntry (RatingEntry (n, r)) = (n, max epsilon r)
 

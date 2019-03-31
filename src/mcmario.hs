@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
+import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
@@ -11,9 +12,11 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Default
+import Data.Either
 import Data.Foldable
 import Data.List
 import Data.Monoid
+import Data.Ratio
 import Data.String
 import Data.Text (Text)
 import Data.Time
@@ -37,29 +40,22 @@ import qualified Data.Aeson as JSON
 import qualified Data.Aeson.TH as JSON
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
-defaultFilename :: FilePath
-defaultFilename = "games.csv"
+defaultGamesFile :: FilePath
+defaultGamesFile = "games.csv"
 
--- invariant: ratingDB's list is infinite
+defaultRatingsFile :: FilePath
+defaultRatingsFile = "ratings.csv"
+
 data Context = Context
-	{ filename :: FilePath
-	, gameDB :: TVar GameDB
-	, ratingDB :: TVar [RatingDB]
-	, ratingDBIterations :: TVar Word
-	, diskDirty :: TVar Bool
+	{ gamesFile :: TMVar FilePath
+	, ratingsFile :: TMVar FilePath
+	, queuedUpdates :: TVar [Name]
+	, currentUpdate :: TVar (Maybe (Name, Word))
 	}
-
-saveThread :: Context -> IO ()
-saveThread ctxt = forever $ do
-	gdb <- atomically $ do
-		dirty <- readTVar (diskDirty ctxt)
-		guard dirty
-		writeTVar (diskDirty ctxt) False
-		readTVar (gameDB ctxt)
-	save (filename ctxt) gdb
 
 -- How many times to try improving the rating database before writing the
 -- result and checking for an updated game database. Fewer is better because it
@@ -73,21 +69,116 @@ iterationsPerSTMUpdate = 1
 maxIterations :: Word
 maxIterations = 10000
 
-ratingsUpdateThread :: Context -> IO ()
-ratingsUpdateThread ctxt = forever . atomically $ do
-	i <- readTVar (ratingDBIterations ctxt)
-	guard (i < maxIterations)
-	rdbs <- readTVar (ratingDB ctxt)
-	let rdbs' = genericDrop iterationsPerSTMUpdate rdbs
-	writeTVar (ratingDB ctxt) rdbs'
-	head rdbs' `deepseq` writeTVar (ratingDBIterations ctxt) (i+iterationsPerSTMUpdate)
+loadCtxt :: MonadIO m =>
+	(FilePath -> IO (Either String a)) ->
+	TMVar FilePath -> m (Either String a)
+loadCtxt loadDB fileLock = liftIO $ do
+	file <- atomically $ takeTMVar fileLock
+	mres <- loadDB file
+	atomically $ putTMVar fileLock file
+	return mres
 
-readTVarSnap :: MonadIO m => TVar a -> m a
-readTVarSnap = liftIO . readTVarIO
+loadGamesCtxt :: MonadIO m => Context -> m (Either String GameDB)
+loadGamesCtxt = loadCtxt loadGames . gamesFile
+
+loadGamesCtxt' :: MonadIO m => Context -> m GameDB
+loadGamesCtxt' ctxt = fromRight def <$> loadGamesCtxt ctxt
+
+loadRatingsCtxt :: MonadIO m => Context -> m (Either String RatingDB)
+loadRatingsCtxt = loadCtxt loadRatings . ratingsFile
+
+loadRatingsCtxt' :: MonadIO m => Context -> m RatingDB
+loadRatingsCtxt' ctxt = fromRight def <$> loadRatingsCtxt ctxt
+
+saveCtxt :: (Eq a, MonadIO m) =>
+	(FilePath -> IO (Either String a)) -> (FilePath -> a -> IO ()) ->
+	TMVar FilePath -> a -> a -> m (Maybe (Either String a))
+saveCtxt loadDB saveDB fileLock db db' = liftIO $ do
+	file <- atomically $ takeTMVar fileLock
+	dbFromDisk <- loadDB file
+	let asExpected = dbFromDisk == Right db
+	when asExpected (saveDB file db')
+	atomically $ putTMVar fileLock file
+	return $ if asExpected then Nothing else Just dbFromDisk
+
+saveGamesCtxt :: MonadIO m => Context -> GameDB -> GameDB -> m (Maybe (Either String GameDB))
+saveGamesCtxt = saveCtxt loadGames saveGames . gamesFile
+
+saveRatingsCtxt :: MonadIO m => Context -> RatingDB -> RatingDB -> m (Maybe (Either String RatingDB))
+saveRatingsCtxt = saveCtxt loadRatings saveRatings . ratingsFile
+
+reportBlocker :: String -> Either String a -> IO ()
+reportBlocker dbType (Left err) = putStrLn
+	$  "WARNING: corrupted " ++ dbType ++ " database is preventing ratings updates; "
+	++ "will try rereading it in 10 seconds.\n\t"
+	++ err
+reportBlocker _ _ = return ()
+
+retrieveComponent :: GameDB -> Name -> IO (Maybe Component)
+retrieveComponent gdb name = case filter (S.member name) (components gdb) of
+	[component] -> return (Just component)
+	[] -> do
+		putStrLn
+			$ "WARNING: ignoring requested update for "
+			++ T.unpack name
+			++ "; no component contains them."
+		return Nothing
+	cs -> do
+		hPutStrLn stderr
+			$ "The impossible happened! "
+			++ T.unpack name
+			++ " is in multiple components:"
+		mapM_ (\c -> hPutStrLn stderr ("\t" ++ show c)) cs
+		hPutStrLn stderr $ "(Ignoring ratings update request for this name as a result.)"
+		return Nothing
+
+componentSelectionThread :: Context -> IO ()
+componentSelectionThread ctxt = forever $ do
+	name <- atomically $ do
+		Nothing <- readTVar (currentUpdate ctxt)
+		name:names <- readTVar (queuedUpdates ctxt)
+		writeTVar (queuedUpdates ctxt) names
+		return name
+	mgdb <- loadGamesCtxt ctxt
+	reportBlocker "game" mgdb
+	case mgdb of
+		Right gdb -> do
+			mComponent <- retrieveComponent gdb name
+			forM_ mComponent $ \component -> atomically $ do
+				modifyTVar (queuedUpdates ctxt) (filter (`S.notMember` component))
+				writeTVar (currentUpdate ctxt) (Just (name, maxIterations))
+		Left err -> do
+			atomically $ modifyTVar (queuedUpdates ctxt) (name:)
+			threadDelay 10000000
+
+ratingsUpdateThread :: Context -> IO ()
+ratingsUpdateThread ctxt = forever $ do
+	(name, iterations) <- atomically $ do
+		Just update <- readTVar (currentUpdate ctxt)
+		return update
+	mgdb <- loadGamesCtxt ctxt
+	reportBlocker "game" mgdb
+	mrdb <- loadRatingsCtxt ctxt
+	reportBlocker "ratings" mrdb
+	case liftA2 (,) mgdb mrdb of
+		Left _ -> threadDelay 10000000
+		Right (gdb, rdb) -> do
+			mComponent <- retrieveComponent gdb name
+			forM_ mComponent $ \component -> do
+				let rdb' = genericIndex (improveComponentRatings gdb rdb component)
+				                        (min iterations iterationsPerSTMUpdate)
+				evaluate (force rdb')
+				merr <- saveRatingsCtxt ctxt rdb rdb'
+				case merr of
+					Just _ -> putStrLn "WARNING: Ratings database modified while computing a ratings update. Discarding the update."
+					Nothing -> atomically . writeTVar (currentUpdate ctxt) $
+						if iterations <= iterationsPerSTMUpdate
+						then Nothing
+						else Just (name, iterations-iterationsPerSTMUpdate)
 
 listPlayersJSON :: Context -> Snap ()
 listPlayersJSON ctxt = ifTop $
-	writeJSON . listPlayers =<< readTVarSnap (gameDB ctxt)
+	writeJSON . listPlayers =<< loadGamesCtxt' ctxt
 
 requireUtf8Param :: MonadSnap m => BS.ByteString -> m Text
 requireUtf8Param label = do
@@ -104,8 +195,7 @@ requireJSONParam label = do
 		_ -> pass
 
 JSON.deriveJSON JSON.defaultOptions ''Confidence
-JSON.deriveJSON JSON.defaultOptions ''Speed
-JSON.deriveJSON JSON.defaultOptions ''PlayerSettings
+JSON.deriveJSON JSON.defaultOptions ''Winner
 JSON.deriveJSON JSON.defaultOptions ''GameRecord
 JSON.deriveJSON JSON.defaultOptions ''Matchup
 
@@ -113,60 +203,77 @@ matchupJSON :: Context -> Snap ()
 matchupJSON ctxt = do
 	left  <- requireUtf8Param (fromString "left" )
 	right <- requireUtf8Param (fromString "right")
-	(gdb, rdb) <- liftIO . atomically $ do
-		gdb <- readTVar (gameDB ctxt)
-		rdbs <- readTVar (ratingDB ctxt)
-		return (gdb, head rdbs)
-	writeJSON (matchup gdb rdb left right)
+	gdb <- loadGamesCtxt' ctxt
+	rdb <- loadRatingsCtxt' ctxt
+	writeJSON (matchup gdb rdb (S.singleton left) (S.singleton right))
 
 addGamePost :: Context -> Snap ()
 addGamePost ctxt = do
+	blue   <- requireJSONParam (fromString   "blue")
+	orange <- requireJSONParam (fromString "orange")
 	winner <- requireJSONParam (fromString "winner")
-	loser  <- requireJSONParam (fromString "loser" )
+	num    <- requireJSONParam (fromString "orange-multiplier")
+	den    <- requireJSONParam (fromString   "blue-multiplier")
 	now <- liftIO getCurrentTime
-	liftIO . atomically $ do
-		gdb <- readTVar (gameDB ctxt)
-		rdbs <- readTVar (ratingDB ctxt)
-		let gdb' = addGame (GameRecord winner loser now) gdb
-		writeTVar (gameDB ctxt) gdb'
-		writeTVar (ratingDB ctxt) (improveRatings gdb' (head rdbs))
-		writeTVar (ratingDBIterations ctxt) 0
-		writeTVar (diskDirty ctxt) True
+	gdb <- loadGamesCtxt' ctxt
+	let gdb' = addGame (GameRecord (S.singleton blue) (S.singleton orange) (num % den) winner now) gdb
+	failure <- saveGamesCtxt ctxt gdb gdb'
+	case failure of
+		Nothing -> liftIO . atomically $ modifyTVar (queuedUpdates ctxt) (++[blue,orange])
+		Just _ -> modifyResponse (setResponseCode 500)
 
 debug :: Context -> Snap ()
 debug ctxt = do
 	modifyResponse (setContentType (fromString "text/plain"))
-	(gdb, rdb, rdbi, dirty) <- liftIO . atomically $ do
-		gdb   <- readTVar (gameDB             ctxt)
-		rdbs  <- readTVar (ratingDB           ctxt)
-		rdbi  <- readTVar (ratingDBIterations ctxt)
-		dirty <- readTVar (diskDirty          ctxt)
-		return (gdb, head rdbs, rdbi, dirty)
-	writeString $  "Storing games in " <> show (filename ctxt)
-	            <> " (currently " <> (if dirty then "out of date" else "up to date") <> ")\n"
-	writeString $  "Rating estimates have improved " <> show rdbi <> " times since last game DB update"
-	            <> " (currently configured to take " <> show iterationsPerSTMUpdate
+	gdb <- loadGamesCtxt ctxt
+	rdb <- loadRatingsCtxt ctxt
+	(gameFile, ratingFile, queued, current) <- liftIO . atomically $ do
+		gameFile   <- readTMVar (gamesFile     ctxt)
+		ratingFile <- readTMVar (ratingsFile   ctxt)
+		queued     <- readTVar  (queuedUpdates ctxt)
+		current    <- readTVar  (currentUpdate ctxt)
+		return (gameFile, ratingFile, queued, current)
+	writeString $  "Storing games in " <> show gameFile <> "\n"
+	writeString $  "Storing ratings in " <> show ratingFile <> "\n"
+	writeString $  "The following players have played since their components' ratings were last updated:\n"
+	            <> unlines ["\t" <> show name | name <- queued]
+	writeString $ case current of
+		Nothing -> "The rating database is not currently being updated.\n"
+		Just (name, iterations)
+			-> "The rating database is currently updating the ratings for " <> show name <> "'s component.\n"
+			<> "\t" <> show iterations <> " update steps remain.\n"
+	writeString $  "\t(currently configured to take " <> show iterationsPerSTMUpdate
 	            <> " improvement steps per write, up to " <> show maxIterations <> " total)\n"
 	writeString $  "Complete rating database dump:\n" <> show rdb <> "\n"
 	writeString $  "Complete game database dump:\n" <> show gdb <> "\n"
 	where writeString = writeText . fromString
 
-gamesCSV :: Context -> Snap ()
-gamesCSV ctxt = do
+serveCSV :: TMVar FilePath -> Snap ()
+serveCSV mfile = do
 	modifyResponse (setContentType (fromString "text/csv"))
-	sendFile (filename ctxt)
+	file <- liftIO . atomically $ readTMVar mfile
+	sendFile file
 
+gamesCSV :: Context -> Snap ()
+gamesCSV = serveCSV . gamesFile
+
+ratingsCSV :: Context -> Snap ()
+ratingsCSV = serveCSV . ratingsFile
+
+main :: IO ()
 main = do
 	args <- getArgs
-	fn <- case args of
-		[fn] -> return fn
-		[] -> return defaultFilename
+	(gamesfn, ratingsfn) <- case args of
+		[] -> return (defaultGamesFile, defaultRatingsFile)
+		[gamesfn] -> return (gamesfn, defaultRatingsFile)
+		[gamesfn, ratingsfn] -> return (gamesfn, ratingsfn)
 		_ -> do
 			progName <- getProgName
-			die $  "USAGE: " <> progName <> " [FILE]\n"
-			    <> "Manage a database of Dr. Mario games and get suggestions for handicapped games\n"
+			die $  "USAGE: " <> progName <> " [FILE [FILE]]\n"
+			    <> "Manage a database of Rocket League games and get suggestions for handicapped games\n"
 			    <> "\n"
-			    <> "FILE defaults to " <> defaultFilename
+			    <> "The first FILE stores the games and defaults to " <> defaultGamesFile <> ".\n"
+			    <> "The second FILE stores the ratings and defaults to " <> defaultRatingsFile <> "."
 	fPort <- do
 		s <- catch (getEnv "MCMARIO_PORT")
 		           (\e -> if isDoesNotExistError e then return "" else throwIO e)
@@ -174,24 +281,23 @@ main = do
 			("", _) -> return id
 			(_, Just p) | p > 0 -> return (setPort p)
 			_ -> die "MCMARIO_PORT must be a positive number"
-	gdb <- load fn `catch` \e -> do
-		let e' :: IOException
-		    e' = e
-		hPutStrLn stderr $ "WARNING: Could not open " <> fn <> "; using an empty game database"
-		return def
-	ctxt <- Context fn
-		<$> newTVarIO gdb
-		<*> newTVarIO (improveRatings gdb def)
-		<*> newTVarIO 0
-		<*> newTVarIO False
-	forkIO (saveThread ctxt)
+	ctxt <- Context
+		<$> newTMVarIO gamesfn
+		<*> newTMVarIO ratingsfn
+		<*> newTVarIO []
+		<*> newTVarIO Nothing
+	forkIO (componentSelectionThread ctxt)
 	forkIO (ratingsUpdateThread ctxt)
 	httpServe (fPort mempty) . asum $
 		[ method GET . route $
 			[ (fromString "players", listPlayersJSON ctxt)
 			, (fromString "matchup/:left/:right", matchupJSON ctxt)
 			, (fromString "debug.txt", debug ctxt)
-			, (fromString "games.csv", gamesCSV ctxt) -- the endpoint is called games.csv no matter what actual database it's using
+			-- the endpoints for the next two are always games.csv and
+			-- ratings.csv, no matter what actual database filename is being
+			-- used
+			, (fromString "games.csv", gamesCSV ctxt)
+			, (fromString "ratings.csv", ratingsCSV ctxt)
 			]
 		, method POST . route $
 			[ (fromString "game", addGamePost ctxt)
