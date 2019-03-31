@@ -17,7 +17,8 @@ executable mcmario
   other-modules:       MCMario.CSV,
                        MCMario.GameDB,
                        MCMario.Model,
-                       MCMario.RatingDB
+                       MCMario.RatingDB,
+                       MCMario.STM
   -- other-extensions:    
   build-depends:       aeson >=1.1 && <1.5,
                        arithmoi >=0.5 && <0.6,

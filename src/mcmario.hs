@@ -3,9 +3,6 @@ module Main where
 
 import Control.Applicative
 import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TChan
-import Control.Concurrent.STM.TVar
 import Control.DeepSeq
 import Control.Exception
 import Control.Monad
@@ -22,9 +19,10 @@ import Data.String
 import Data.Text (Text)
 import Data.Time
 import Data.Word
+import MCMario.CSV
 import MCMario.GameDB
 import MCMario.RatingDB
-import MCMario.CSV
+import MCMario.STM
 import System.Environment
 import System.Exit
 import System.IO
@@ -226,7 +224,7 @@ addGamePost ctxt = do
 	let gdb' = addGame (GameRecord (S.singleton blue) (S.singleton orange) (num % den) winner now) gdb
 	failure <- saveGamesCtxt ctxt gdb gdb'
 	case failure of
-		Nothing -> liftIO . atomically $ modifyTVar (queuedUpdates ctxt) (++[blue,orange])
+		Nothing -> atomically $ modifyTVar (queuedUpdates ctxt) (++[blue,orange])
 		Just _ -> modifyResponse (setResponseCode 500)
 
 debug :: Context -> Snap ()
@@ -234,7 +232,7 @@ debug ctxt = do
 	modifyResponse (setContentType (fromString "text/plain"))
 	gdb <- loadGamesCtxt ctxt
 	rdb <- loadRatingsCtxt ctxt
-	(gameFile, ratingFile, queued, current) <- liftIO . atomically $ do
+	(gameFile, ratingFile, queued, current) <- atomically $ do
 		gameFile   <- readTMVar (gamesFile     ctxt)
 		ratingFile <- readTMVar (ratingsFile   ctxt)
 		queued     <- readTVar  (queuedUpdates ctxt)
@@ -258,7 +256,7 @@ debug ctxt = do
 serveCSV :: TMVar FilePath -> Snap ()
 serveCSV mfile = do
 	modifyResponse (setContentType (fromString "text/csv"))
-	file <- liftIO . atomically $ readTMVar mfile
+	file <- atomically $ readTMVar mfile
 	sendFile file
 
 gamesCSV :: Context -> Snap ()
