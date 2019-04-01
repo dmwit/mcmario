@@ -58,10 +58,10 @@ data Context = Context
 
 -- How many times to try improving the rating database before writing the
 -- result and checking for an updated game database. Fewer is better because it
--- means we will throw away less work when a game is recorded; more is better
--- because it means we spend less time doing STM stuff per improvement.
+-- means recommendations adjust to new data more quickly; more is better
+-- because it means we spend less time doing disk access per improvement.
 iterationsPerSTMUpdate :: Word
-iterationsPerSTMUpdate = 1
+iterationsPerSTMUpdate = 50
 
 -- Declare success even if the ratings database is still changing after this
 -- many attempts to improve it.
@@ -166,7 +166,7 @@ ratingsUpdateThread ctxt = forever $ do
 			forM_ mComponent $ \component -> do
 				let rdb' = genericIndex (improveComponentRatings gdb rdb component)
 				                        (min iterations iterationsPerSTMUpdate)
-				evaluate (force rdb')
+				evaluate (rnf rdb')
 				merr <- saveRatingsCtxt ctxt rdb rdb'
 				case merr of
 					Just _ -> putStrLn "WARNING: Ratings database modified while computing a ratings update. Discarding the update."
