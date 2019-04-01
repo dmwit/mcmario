@@ -143,7 +143,7 @@ components db@(GameDB { games = gs }) =
 
 hasTie :: GameDB -> Component -> Bool
 hasTie db ns = flip any ns $ \n -> or
-	[ winner g == Tie
+	[ winner g == Tie && blue g `S.isSubsetOf` ns && orange g `S.isSubsetOf` ns
 	| Just playerNode <- [M.lookup n (nodes db)]
 	, gameNode <- G.pre (games db) playerNode
 	, Just (Right g) <- [G.lab (games db) gameNode]
