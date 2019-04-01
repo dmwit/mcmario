@@ -132,12 +132,21 @@ type Component = Set Name
 -- | Retrieve the collections of people it makes sense to rate against each
 -- other.
 components :: GameDB -> [Component]
-components GameDB { games = gs } =
-	[ S.fromList names
+components db@(GameDB { games = gs }) =
+	[ component
 	| scc_ <- G.scc gs
 	, let scc = map (fromJust . G.lab gs) scc_
 	      (names, games) = partitionEithers scc
-	, any ((Tie==) . winner) games
+	      component = S.fromList names
+	, hasTie db component
+	]
+
+hasTie :: GameDB -> Component -> Bool
+hasTie db ns = flip any ns $ \n -> or
+	[ winner g == Tie
+	| Just playerNode <- [M.lookup n (nodes db)]
+	, gameNode <- G.pre (games db) playerNode
+	, Just (Right g) <- [G.lab (games db) gameNode]
 	]
 
 -- | Retrieve all games in which at least one of the players is in the given
