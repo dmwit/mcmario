@@ -37,6 +37,21 @@ input.level {
 	text-align: center;
 	float: right;
 }
+.tie {
+	float: left;
+	margin-left: 10%;
+	background-color: #078df6;
+	color: #e7eff6;
+	border-radius: 2ex;
+	padding-top: 1ex;
+	padding-bottom: 1ex;
+	font-size: 24px;
+	width: 50%;
+	text-align: center;
+}
+#tie {
+	width: 90%;
+}
 .sync {
 	float: right;
 	margin-right: 10%;

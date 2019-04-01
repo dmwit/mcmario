@@ -6,13 +6,14 @@ $(setUp);
 
 function setUp() {
 	refreshNameList();
-	$(" #left .name ").click("left" , recordGame);
-	$("#right .name ").click("right", recordGame);
+	$(" #left .name ").click("blue"  , recordGame);
+	$("#right .name ").click("orange", recordGame);
+	$("#tie         ").click("tie"   , recordGame);
 	$( "#left .clear").click("left" , clearPlayer);
 	$("#right .clear").click("right", clearPlayer);
 	// TODO: bind is deprecated in favor of on
-	$(" #left .level").bind("keyup input", "left" , synchronizeLevel);
-	$("#right .level").bind("keyup input", "right", synchronizeLevel);
+	$(" #left .level").bind("keyup input", "left" , synchronizeLevelAndDescribeTie);
+	$("#right .level").bind("keyup input", "right", synchronizeLevelAndDescribeTie);
 	$("#new-player form").on("submit", addName);
 }
 
@@ -93,11 +94,13 @@ function clearSelectors() {
 function disableSelectors() {
 	$(".player .level").prop("disabled", true);
 	$("#sync").prop("disabled", true);
+	$("#tie").addClass("uninitialized");
 }
 
 function enableSelectors() {
 	$(".player .level").prop("disabled", false);
 	$("#sync").prop("disabled", false);
+	$("#tie").removeClass("uninitialized");
 }
 
 function setMatchup(data, result, jqxhr) {
@@ -108,6 +111,12 @@ function setMatchup(data, result, jqxhr) {
 	levelMap["left" ] = data.leftToRight;
 	levelMap["right"] = data.rightToLeft;
 	enableSelectors();
+	describeTie();
+}
+
+function synchronizeLevelAndDescribeTie(ev) {
+	synchronizeLevel(ev);
+	describeTie();
 }
 
 function synchronizeLevel(ev) {
@@ -118,6 +127,13 @@ function synchronizeLevel(ev) {
 	var there = otherSide(here);
 	var levelThere = levelMap[here][levelHere];
 	$("#" + there + " .level").prop("value", levelThere);
+}
+
+function describeTie() {
+	var tieDescription = "Overtime";
+	if($("#left .level").prop("value") !== $("#right .level").prop("value"))
+		tieDescription = "Tie"
+	$("#tie").text(tieDescription);
 }
 
 function recordGame(ev) {
@@ -132,9 +148,8 @@ function recordGame(ev) {
 		, "orange"           : $("#right .name").text()
 		,   "blue-multiplier": $("#left  .level").prop("value")
 		, "orange-multiplier": $("#right .level").prop("value")
+		, "winner"           : ev.data
 		};
-	if(ev.data === "left") postData.winner = "blue";
-	else postData.winner = "orange";
 	// TODO: why are we getting an XML parsing error every time we record a game?
 	$.post("/game", postData, gameRecorded, "text").fail(gameNotRecorded);
 }
