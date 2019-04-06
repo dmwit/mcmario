@@ -206,25 +206,25 @@ JSON.deriveJSON JSON.defaultOptions ''Matchup
 
 matchupJSON :: Context -> Snap ()
 matchupJSON ctxt = do
-	left  <- requireUtf8Param (fromString "left" )
-	right <- requireUtf8Param (fromString "right")
+	left  <- requireJSONParam (fromString "left" )
+	right <- requireJSONParam (fromString "right")
 	gdb <- loadGamesCtxt' ctxt
 	rdb <- loadRatingsCtxt' ctxt
-	writeJSON (matchup gdb rdb (S.singleton left) (S.singleton right))
+	writeJSON (matchup gdb rdb left right)
 
 addGamePost :: Context -> Snap ()
 addGamePost ctxt = do
-	blue   <- requireUtf8Param (fromString   "blue")
-	orange <- requireUtf8Param (fromString "orange")
+	blue   <- requireJSONParam  (fromString   "blue")
+	orange <- requireJSONParam  (fromString "orange")
 	winner <- requireFieldParam (fromString "winner")
-	num    <- requireJSONParam (fromString "orange-multiplier")
-	den    <- requireJSONParam (fromString   "blue-multiplier")
+	num    <- requireJSONParam  (fromString "orange-multiplier")
+	den    <- requireJSONParam  (fromString   "blue-multiplier")
 	now <- liftIO getCurrentTime
 	gdb <- loadGamesCtxt' ctxt
-	let gdb' = addGame (GameRecord (S.singleton blue) (S.singleton orange) (num % den) winner now) gdb
+	let gdb' = addGame (GameRecord blue orange (num % den) winner now) gdb
 	failure <- saveGamesCtxt ctxt gdb gdb'
 	case failure of
-		Nothing -> atomically $ modifyTVar (queuedUpdates ctxt) (++[blue,orange])
+		Nothing -> atomically $ modifyTVar (queuedUpdates ctxt) (++(S.toList blue ++ S.toList orange))
 		Just _ -> modifyResponse (setResponseCode 500)
 
 debug :: Context -> Snap ()

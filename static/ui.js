@@ -71,7 +71,8 @@ function refreshMatchup() {
 	if(left.hasClass("uninitialized") || right.hasClass("uninitialized"))
 		return;
 
-	var path = "/matchup/" + left.text() + "/" + right.text();
+	function forHTTP(div) { return encodeURIComponent(JSON.stringify([div.text()])); }
+	var path = "/matchup/" + forHTTP(left) + "/" + forHTTP(right);
 	clearSelectors();
 	disableSelectors();
 	mostRecentMatchup = $.get(path, setMatchup);
@@ -144,8 +145,8 @@ function recordGame(ev) {
 	$(".clear").addClass("disabled");
 
 	var postData =
-		{   "blue"           : $("#left  .name").text()
-		, "orange"           : $("#right .name").text()
+		{   "blue"           : JSON.stringify([$("#left  .name").text()])
+		, "orange"           : JSON.stringify([$("#right .name").text()])
 		,   "blue-multiplier": $("#left  .level").prop("value")
 		, "orange-multiplier": $("#right .level").prop("value")
 		, "winner"           : ev.data
