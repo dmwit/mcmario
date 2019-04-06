@@ -207,7 +207,7 @@ unsafeMatchup lRating rRating = Matchup
 	ratio = lMultiplier % rMultiplier
 	(lMultiplier, (rMultiplier, _)) = maximumBy (comparing (normalizeQuality . snd . snd)) lToR
 	lToR = [(multiplier, bestMatch lRating rRating multiplier) | multiplier <- [1..maxMultiplier]]
-	rToL = [(multiplier, bestMatch lRating rRating multiplier) | multiplier <- [1..maxMultiplier]]
+	rToL = [(multiplier, bestMatch rRating lRating multiplier) | multiplier <- [1..maxMultiplier]]
 
 -- | If @bestMatch r1 r2 multiplier1 = (multiplier2, quality)@, then
 --
