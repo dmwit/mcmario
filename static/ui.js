@@ -70,7 +70,7 @@ function refreshMatchup() {
 	if(left.hasClass("uninitialized") || right.hasClass("uninitialized"))
 		return;
 
-	var path = "/matchup/" + left.text() + "/" + right.text();
+	var path = "/matchup/" + encodeURIComponent(left.text()) + "/" + encodeURIComponent(right.text());
 	clearSelectors();
 	disableSelectors();
 	mostRecentMatchup = $.get(path, setMatchup);
