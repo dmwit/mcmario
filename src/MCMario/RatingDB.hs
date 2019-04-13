@@ -39,7 +39,7 @@ maxMultiplier = 10
 improveComponentRatings :: GameDB -> RatingDB -> Component -> [RatingDB]
 improveComponentRatings gdb rdb ns = id
 	. map (M.unionWith (\old new -> new) rdb)
-	. gradAscend 1e-2 1.5 (componentGames gdb ns)
+	. gradAscend 15 1.5 (componentGames gdb ns)
 	. M.union (M.restrictKeys rdb ns)
 	. M.fromSet (const defaultRating)
 	$ ns
@@ -52,7 +52,9 @@ setRate n = M.insert n . max epsilon
 -- | We use the log-likelihood of the game records we've seen as the objective.
 -- Any player with no 'Rate' is given some sensible default.
 objective :: [GameRecord] -> RatingDB -> Double
-objective gs rs = sum (map gameObjective gs) where
+-- We divide by the length so that the learning rate applies consistently no
+-- matter how many games we're training on.
+objective gs rs = sum (map gameObjective gs) / fromIntegral (length gs) where
 	gameObjective g = log (clipProb p) where
 		rBlue   = teamRating (blue   g)
 		rOrange = teamRating (orange g)

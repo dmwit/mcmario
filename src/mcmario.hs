@@ -61,12 +61,12 @@ data Context = Context
 -- means recommendations adjust to new data more quickly; more is better
 -- because it means we spend less time doing disk access per improvement.
 iterationsPerSTMUpdate :: Word
-iterationsPerSTMUpdate = 50
+iterationsPerSTMUpdate = 10
 
 -- Declare success even if the ratings database is still changing after this
 -- many attempts to improve it.
 maxIterations :: Word
-maxIterations = 10000
+maxIterations = 70
 
 loadCtxt :: MonadIO m =>
 	(FilePath -> IO (Either String a)) ->

@@ -1,5 +1,6 @@
 file = "doubles-no-div.dat"
 set terminal x11
+set yrange [0:12]
 plot file using 1:2 title "A", \
      file using 1:3 title "B", \
      file using 1:4 title "C", \
