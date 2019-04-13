@@ -49,31 +49,18 @@ improveComponentRatings gdb rdb ns = id
 setRate :: Name -> Rate -> RatingDB -> RatingDB
 setRate n = M.insert n . max epsilon
 
--- | Ideally, we'd like to maximize the likelihood of the game records we've
--- seen. But the usual problem with that is the likelihood drops quickly as you
--- see more games, and can easily underflow to 0 (especially when the ratings
--- are not yet close to correct). The usual fix is to consider log likelihood
--- instead, and add log-probabilities instead of multiplying probabilities.
--- We'll do something pretty similar, with a slight modification: before taking
--- the log, we'll multiply each probability by the available precision. As with
--- taking the log, this is a monotonic change, so optimizing this function is
--- the same as optimizing the log likelihood. We make this change so that we
--- don't arbitrarily drop all the precision we have when converting to
--- 'Double'; we convert to 'Double' because 'Rate' doesn't support 'log'.
---
+-- | We use the log-likelihood of the game records we've seen as the objective.
 -- Any player with no 'Rate' is given some sensible default.
 objective :: [GameRecord] -> RatingDB -> Double
--- TODO: perhaps it is safe not to divide by the length...?
-objective gs rs = sum (map gameObjective gs) / genericLength gs where
-	gameObjective g = log (fromInteger v) where
+objective gs rs = sum (map gameObjective gs) where
+	gameObjective g = log (clipProb p) where
 		rBlue   = teamRating (blue   g)
 		rOrange = teamRating (orange g)
-		v = fullPrecisionRate . clipProb
-		  $ gameProbability (winner g) (handicap g) rBlue rOrange
+		p = gameProbability (winner g) (handicap g) rBlue rOrange
 
 	-- log 0 is -Infinity, that's right out
 	-- log 1 is perfectly fine, but let's avoid it anyway for symmetry
-	clipProb = min (1-epsilon) . max epsilon
+	clipProb = min 0.9999999999999999 . max epsilon
 	playerRating n = M.findWithDefault defaultRating n rs
 	teamRating = sum . map playerRating . S.toList
 
@@ -88,10 +75,10 @@ objective gs rs = sum (map gameObjective gs) / genericLength gs where
 -- | Find the approximate gradient of the objective function numerically.
 numericGradient :: [GameRecord] -> RatingDB -> Gradients
 numericGradient gs rs = M.mapWithKey numGradAt rs where
-	numGradAt n r = realToFrac (f hi - f lo) %/ (hi - lo) where
+	numGradAt n r = (f hi - f lo) / (hi - lo) where
 		f x = objective gs (setRate n x rs)
-		hi = r %* 1.00001
-		lo = r %/ 1.00001
+		hi = r * 1.00001
+		lo = r / 1.00001
 
 -- TODO: This adjustmentFactor stuff is assuming everything is positive; should
 -- be bother being worried about that? Currently:
@@ -111,14 +98,14 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 -- The learning parameter and adjustment factor are assumed to be positive.
 gradAscendStep :: Rate -> Rate -> [GameRecord] -> RatingDB -> RatingDB
 gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
-	(\v dv -> clip v (v + dv%*learningRate))
+	(\v dv -> clip v (v + dv*learningRate))
 	rs
 	(numericGradient gs rs)
 	where
 	clip v = id
 		. max epsilon
-		. max (v%/adjustmentFactor)
-		. min (v%*adjustmentFactor)
+		. max (v/adjustmentFactor)
+		. min (v*adjustmentFactor)
 
 -- TODO: look into using SBV's SReal for the optimization problem here
 
@@ -184,13 +171,13 @@ matchup games ratings lNames rNames = case S.lookupMin lNames >>= flip M.lookup 
 		Just component -> geometricMean (ratings `M.restrictKeys` component)
 		Nothing -> defaultRating
 	normalizedTotalRating names = sum
-		[ M.findWithDefault defaultRating name ratings %/ meanRating name
+		[ M.findWithDefault defaultRating name ratings / meanRating name
 		| name <- S.toList names
 		]
 	lNormalizedRating = normalizedTotalRating lNames
 	rNormalizedRating = normalizedTotalRating rNames
-	lRating' = normalizedTotalRating lNames %* 1.3^length lWinEdges
-	rRating' = normalizedTotalRating rNames %* 1.3^length rWinEdges
+	lRating' = normalizedTotalRating lNames * 1.3^length lWinEdges
+	rRating' = normalizedTotalRating rNames * 1.3^length rWinEdges
 
 -- | Internal use only. Given some ratings, produce a matchup. It's on you to
 -- make sure the ratings can be sensibly compared (i.e. are from the same
@@ -222,7 +209,7 @@ bestMatch r1 r2 multiplier1 = case quality r1 r2 (guess % multiplier1) of
 	  | otherwise -> searchDown guess p
 	where
 	clip = max 1 . min maxMultiplier
-	guess = clip . floor $ r1 %* fromInteger multiplier1 %/ r2
+	guess = clip . floor $ r1 * fromInteger multiplier1 / r2
 
 	searchUp guess p | guess == maxMultiplier = (guess, p)
 	searchUp guess p = case quality r1 r2 ((guess+1) % multiplier1) of
@@ -250,7 +237,7 @@ normalizeQuality :: Rate -> Rate
 normalizeQuality p | p > 1 = 1/p | otherwise = p
 
 quality :: Rate -> Rate -> Rational -> Rate
-quality r1 r2 handicap = win %/ lose where
+quality r1 r2 handicap = win / lose where
 	-- The win and loss probabilities cost about the same to compute, but the
 	-- tie probability is much cheaper. So if we have to compute two
 	-- probabilities, we want one of them to be the tie probability.

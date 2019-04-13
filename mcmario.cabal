@@ -21,7 +21,6 @@ executable mcmario
                        MCMario.STM
   -- other-extensions:    
   build-depends:       aeson >=1.1 && <1.5,
-                       arithmoi >=0.5 && <0.6,
                        base >=4.9 && <4.12,
                        bytestring >=0.10 && <0.11,
                        cassava >=0.5 && <0.6,
@@ -56,7 +55,6 @@ benchmark bench
                        MCMario.Model,
                        MCMario.RatingDB
   build-depends:
-                       arithmoi >=0.5 && <0.6,
                        base >=4.9 && <4.12,
                        bytestring >=0.10 && <0.11,
                        cassava >=0.5 && <0.6,
@@ -84,7 +82,6 @@ executable mc-rating-graph
                        MCMario.Model,
                        MCMario.RatingDB
   build-depends:       aeson >=1.1 && <1.5,
-                       arithmoi >=0.5 && <0.6,
                        base >=4.9 && <4.12,
                        bytestring >=0.10 && <0.11,
                        cassava >=0.5 && <0.6,

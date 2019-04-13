@@ -1,38 +1,26 @@
 module MCMario.Model
 	( Rate
 	, gameProbability
-	, fullPrecisionRate
 	, epsilon
 	, geometricMean
-	, (%/)
-	, (%*)
 	) where
 
 import Data.Fixed
 import Data.List.Split
 import Data.Ratio
-import Math.NumberTheory.Powers.General
 import MCMario.GameDB
-
--- | For numbers stored as multiples of 1e-100.
-data E100
-instance HasResolution E100 where resolution _ = 10^100
 
 -- | A measure of how quickly a player clears viruses. (The parameter to a
 -- Poisson or exponential distribution.) Functions that accept one of these
 -- expect it to be positive.
 --
 -- You are intended to treat this type as abstract (i.e. not know that it's
--- actually a @Fixed E100@).
-type Rate = Fixed E100
-
--- | @(/epsilon)@, but efficiently.
-fullPrecisionRate :: Rate -> Integer
-fullPrecisionRate (MkFixed v) = v
+-- actually a @Double@).
+type Rate = Double
 
 -- | The smallest positive rate.
 epsilon :: Rate
-epsilon = MkFixed 1
+epsilon = 5e-324
 
 -- TODO: address https://stackoverflow.com/q/45067989/791604
 -- (if it hasn't been fixed upstream already)
@@ -42,46 +30,20 @@ epsilon = MkFixed 1
 geometricMean :: (Functor f, Foldable f) => f Rate -> Rate
 geometricMean rs
 	| null rs = error "geometricMean called on empty container"
-	| otherwise = id
-	. MkFixed
-	. integerRoot (length rs)
-	. product
-	. fmap (\(MkFixed i) -> i) -- TODO: coerce?
-	$ rs
-
--- | A version of 'div' that rounds instead of flooring.
-divRound :: Integral a => a -> a -> a
-divRound a b = div (a + div b 2) b
-
-infixl 7 %/, %*
--- | The implementation of '(/)' in base systematically underestimates its
--- result -- it does something akin to floor instead of round after computing
--- the division. This function does slightly better.
-(%/) :: HasResolution a => Fixed a -> Fixed a -> Fixed a
-fa@(MkFixed a) %/ MkFixed b = MkFixed (divRound (a * resolution fa) b)
-
--- | The implementation of '(*)' in base systematically underestimates its
--- result -- it does something akin to floor instead of round after computing
--- the multiplication. This function does slightly better.
-(%*) :: HasResolution a => Fixed a -> Fixed a -> Fixed a
-fa@(MkFixed a) %* MkFixed b = MkFixed (divRound (a * b) (resolution fa))
+	| otherwise = product rs ** (1/fromIntegral (length rs))
 
 -- | Given a rate at which goals are scored, compute the unnormalized weights
 -- of each possible number of goals. (Unnormalized: this computes the Poisson
 -- distribution, but without the exponential factor that makes it sum to 1.)
 goalCountWeights :: Rate -> [Rate]
-goalCountWeights r = takeWhile (>0) $ scanl (\w i -> w%*r%/i) 1 [1,2..]
-
--- | Like 'exp', but actually works.
-expRate :: Rate -> Rate
-expRate = sum . goalCountWeights
+goalCountWeights r = takeWhile (>0) $ scanl (\w i -> w*r/i) 1 [1,2..]
 
 -- | Given a handicap -- a factor by which orange's score is multiplied -- and
 -- the rates at which blue and orange score goals, compute the probability that
 -- blue wins.
 winProbability :: Rational -> Rate -> Rate -> Rate
-winProbability handicap rBlue rOrange = totalWeight %/ normalizationFactor where
-	normalizationFactor = expRate (rBlue+rOrange)
+winProbability handicap rBlue rOrange = totalWeight / normalizationFactor where
+	normalizationFactor = exp (rBlue+rOrange)
 	winningScoresForBlue = map (floor . (1+)) . iterate (handicap+) $ 0
 	winningScoreDeltasForBlue = zipWith (-) (tail winningScoresForBlue) winningScoresForBlue
 	weightsBlue = id
@@ -89,18 +51,18 @@ winProbability handicap rBlue rOrange = totalWeight %/ normalizationFactor where
 		. scanl (flip drop) (drop 1 $ goalCountWeights rBlue)
 		$ winningScoreDeltasForBlue
 	weightsOrange = goalCountWeights rOrange
-	totalWeight = sum . concat $ zipWith (\wsBlue wOrange -> map (wOrange%*) wsBlue) weightsBlue weightsOrange
+	totalWeight = sum . concat $ zipWith (\wsBlue wOrange -> map (wOrange*) wsBlue) weightsBlue weightsOrange
 
 -- | Given a handicap -- a factor by which orange's score is multiplied -- and
 -- the rates at which blue and orange score goals, compute the probability that
 -- they tie.
 tieProbability :: Rational -> Rate -> Rate -> Rate
-tieProbability handicap rBlue rOrange = totalWeight %/ normalizationFactor where
-	normalizationFactor = expRate (rBlue+rOrange)
+tieProbability handicap rBlue rOrange = totalWeight / normalizationFactor where
+	normalizationFactor = exp (rBlue+rOrange)
 	spacedWeights n r = map head . chunksOf (fromInteger n) $ goalCountWeights r
 	weightsBlue   = spacedWeights (numerator   handicap) rBlue
 	weightsOrange = spacedWeights (denominator handicap) rOrange
-	totalWeight = sum $ zipWith (%*) weightsBlue weightsOrange
+	totalWeight = sum $ zipWith (*) weightsBlue weightsOrange
 
 -- TODO: This has an odd behavior, I think. Namely: it penalizes players who
 -- choose to participate in team games for tying the game. Since we add the
