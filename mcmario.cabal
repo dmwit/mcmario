@@ -43,6 +43,7 @@ executable mcmario
   default-language:    Haskell2010
   ghc-options:         -fno-warn-tabs
                        -threaded
+                       -O2
 
 -- TODO: make an mcmario library so we can reduce the duplication with the
 -- executable stanza above (but be careful about including MCMario.CSV and its
@@ -66,6 +67,34 @@ benchmark bench
                        fgl >=5.5 && <5.6,
                        mtl >=2.2 && <2.3,
                        split >=0.2 && <0.3,
+                       text >=1.2 && <1.3,
+                       time >=1.6 && <1.7,
+                       unix >=2.7 && <2.8,
+                       vector >=0.12 && <0.13
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+  ghc-options:         -fno-warn-tabs
+                       -threaded
+                       -O2
+
+executable mc-rating-graph
+  main-is: mc-rating-graph.hs
+  other-modules:       MCMario.CSV,
+                       MCMario.GameDB,
+                       MCMario.Model,
+                       MCMario.RatingDB
+  build-depends:       aeson >=1.1 && <1.5,
+                       arithmoi >=0.5 && <0.6,
+                       base >=4.9 && <4.12,
+                       bytestring >=0.10 && <0.11,
+                       cassava >=0.5 && <0.6,
+                       containers >=0.5.8 && <0.6,
+                       data-default >=0.7 && <0.8,
+                       deepseq >=1.4 && <1.5,
+                       fgl >=5.5 && <5.6,
+                       mtl >=2.2 && <2.3,
+                       split >=0.2 && <0.3,
+                       stm >=2.4 && <2.5,
                        text >=1.2 && <1.3,
                        time >=1.6 && <1.7,
                        unix >=2.7 && <2.8,
