@@ -1,7 +1,18 @@
+#templates { display: none; }
+.team {
+	font-size: 24px;
+	margin-top: 2ex;
+	margin-bottom: 2ex;
+}
 .player {
 	font-size: 24px;
 	margin-top: 2ex;
 	margin-bottom: 2ex;
+}
+.player-list {
+	margin-left: 10%;
+	width: 50%;
+	float: left;
 }
 .name-container {
 	background-color: #078df6;
@@ -9,9 +20,9 @@
 	border-radius: 2ex;
 	padding-top: 1ex;
 	padding-bottom: 1ex;
-	margin-left: 10%;
-	width: 50%;
-	float: left;
+	margin-top: 0.5ex;
+	margin-bottom: 0.5ex;
+	width: 100%;
 }
 select {
 	font-size: inherit;

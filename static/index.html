@@ -8,27 +8,29 @@
 	<script src="ui.js"></script>
 </head>
 <body>
-	<div class="player" id="left">
+	<div id="templates">
 		<div class="name-container">
-			<div class="name uninitialized">???</div>
-			<div class="clear disabled"><img src="x.png" alt="clear selection"></div>
+			<div class="name"></div>
+			<div class="clear" onclick="clearPlayer(this, event)"><img src="x.png" alt="clear selection"></div>
 			<div class="webdev-is-fun"></div>
 		</div>
+		<div class="tie">Tie</div>
+		<div class="overtime">Overtime</div>
+		<div class="player-name" onclick="queueName(this.textContent)"></div>
+	</div>
+	<div class="team" id="left">
+		<div class="player-list" onclick="recordGame('blue')"></div>
 		<input class="level" type="number" min="0" max="10" disabled>
 		<div class="webdev-is-fun"></div>
 	</div>
-	<div class="tie"><div class="uninitialized" id="tie">Tie</div></div>
+	<div class="tie" onclick="recordGame('tie')"><div class="uninitialized" id="tie">Tie</div></div>
 	<div class="sync">
 		<input type="checkbox" id="sync" disabled>
 		<label for="sync">Keep multipliers synchronized</label>
 	</div>
 	<div class="webdev-is-fun"></div>
-	<div class="player" id="right">
-		<div class="name-container">
-			<div class="name uninitialized">???</div>
-			<div class="clear disabled" id="right-clear"><img src="x.png" alt="clear selection"></div>
-			<div class="webdev-is-fun"></div>
-		</div>
+	<div class="team" id="right">
+		<div class="player-list" onclick="recordGame('orange')"></div>
 		<input class="level" type="number" min="0" max="10" disabled>
 		<div class="webdev-is-fun"></div>
 	</div>

@@ -6,11 +6,6 @@ $(setUp);
 
 function setUp() {
 	refreshNameList();
-	$(" #left .name ").click("blue"  , recordGame);
-	$("#right .name ").click("orange", recordGame);
-	$("#tie         ").click("tie"   , recordGame);
-	$( "#left .clear").click("left" , clearPlayer);
-	$("#right .clear").click("right", clearPlayer);
 	// TODO: bind is deprecated in favor of on
 	$(" #left .level").bind("keyup input", "left" , synchronizeLevelAndDescribeTie);
 	$("#right .level").bind("keyup input", "right", synchronizeLevelAndDescribeTie);
@@ -22,17 +17,10 @@ function refreshNameList() {
 	replacement.id = "name-list";
 	$.get("/players").done(function(data) {
 		data.forEach(function(player) {
-			div = document.createElement("div");
-			div.textContent = player;
-			div.addEventListener("click", selectName);
-			replacement.appendChild(div);
+			$("#templates .player-name").clone().text(player).appendTo(replacement);
 		});
 		$("#name-list").replaceWith(replacement);
 	});
-}
-
-function selectName() {
-	queueName(this.textContent);
 }
 
 function addName() {
@@ -48,58 +36,61 @@ function addName() {
 }
 
 function queueName(name) {
+	$(".name").each(function() {
+		if(this.textContent == name)
+			$(this).parent().remove();
+	});
+
 	var side;
-	if($("#left .name").hasClass("uninitialized"))
-		side = "left";
-	else if($("#right .name").hasClass("uninitialized"))
-		side = "right";
-	else
-		side = nextSide;
+	var leftSize  = $("#left  .name").length;
+	var rightSize = $("#right .name").length;
+	if     (leftSize < rightSize) side = "left";
+	else if(rightSize < leftSize) side = "right";
+	else                          side = nextSide;
 
 	nextSide = otherSide(side);
-	var here  = $("#" + side     + " .name");
-	var there = $("#" + nextSide + " .name");
-
-	here.text(name).removeClass("uninitialized");
-	$("#" + side + " .clear").removeClass("disabled");
+	$("#" + side + " .name-container").slice(3).remove();
+	div = $("#templates .name-container").clone();
+	div.children(".name").text(name);
+	div.prependTo($("#" + side + " .player-list"));
 	refreshMatchup();
 }
 
 function refreshMatchup() {
-	var left  = $( "#left .name");
-	var right = $("#right .name");
-	if(left.hasClass("uninitialized") || right.hasClass("uninitialized"))
-		return;
-
-	function forHTTP(div) { return encodeURIComponent(JSON.stringify([div.text()])); }
-	var path = "/matchup/" + forHTTP(left) + "/" + forHTTP(right);
 	clearSelectors();
 	disableSelectors();
+
+	var teams = jsonTeams();
+	if(!teams) return;
+
+	var path = "/matchup/" + encodeURIComponent(teams.left ) +
+	           "/"         + encodeURIComponent(teams.right);
 	mostRecentMatchup = $.get(path, setMatchup);
 }
 
-function clearPlayer(ev) {
-	var side = ev.data;
-	$("#" + side + " .name").text("???").addClass("uninitialized");
-	$("#" + side + " .clear").addClass("disabled");
-	clearSelectors();
-	disableSelectors();
+function clearPlayer(img, ev) {
+	$(img).parent().remove();
+	refreshMatchup();
+	// TODO: does this work on IE??
+	// see also https://stackoverflow.com/q/387736/791604
+	if(ev.stopPropagation) ev.stopPropagation();
+	ev.cancelBubble = true;
 }
 
 function clearSelectors() {
-	$(".player .level").prop("value", "");
+	$(".team .level").prop("value", "");
 	$("#sync").prop("checked", false);
 	$("#game-record-error-box").addClass("hidden");
 }
 
 function disableSelectors() {
-	$(".player .level").prop("disabled", true);
+	$(".team .level").prop("disabled", true);
 	$("#sync").prop("disabled", true);
 	$("#tie").addClass("uninitialized");
 }
 
 function enableSelectors() {
-	$(".player .level").prop("disabled", false);
+	$(".team .level").prop("disabled", false);
 	$("#sync").prop("disabled", false);
 	$("#tie").removeClass("uninitialized");
 }
@@ -131,33 +122,44 @@ function synchronizeLevel(ev) {
 }
 
 function describeTie() {
-	var tieDescription = "Overtime";
+	var tieDescription = $("#templates .overtime").text();
 	if($("#left .level").prop("value") !== $("#right .level").prop("value"))
-		tieDescription = "Tie"
+		tieDescription = $("#templates .tie").text();
 	$("#tie").text(tieDescription);
 }
 
-function recordGame(ev) {
-	if($("#left  .name").hasClass("uninitialized") ||
-	   $("#right .name").hasClass("uninitialized"))
-		return;
+function jsonTeams() {
+	var left  = $( "#left .name"); if( left.length == 0) return false;
+	var right = $("#right .name"); if(right.length == 0) return false;
+	var  leftNames = [];
+	var rightNames = [];
+	 left.each(function() {  leftNames.push(this.textContent); });
+	right.each(function() { rightNames.push(this.textContent); });
+	return {  left: JSON.stringify( leftNames)
+	       , right: JSON.stringify(rightNames)
+	       };
+}
+
+function recordGame(winner) {
+	var teams = jsonTeams();
+	if(!teams) return;
 	disableSelectors();
-	$(".clear").addClass("disabled");
+	$(".team .clear").addClass("disabled");
 
 	var postData =
-		{   "blue"           : JSON.stringify([$("#left  .name").text()])
-		, "orange"           : JSON.stringify([$("#right .name").text()])
+		{   "blue"           : teams.left
+		, "orange"           : teams.right
 		,   "blue-multiplier": $("#left  .level").prop("value")
 		, "orange-multiplier": $("#right .level").prop("value")
-		, "winner"           : ev.data
+		, "winner"           : winner
 		};
 	// TODO: why are we getting an XML parsing error every time we record a game?
 	$.post("/game", postData, gameRecorded, "text").fail(gameNotRecorded);
 }
 
 function gameRecorded() {
-	clearPlayer({ data: "left" });
-	clearPlayer({ data: "right"});
+	$(".team .name-container").remove();
+	refreshMatchup();
 	// TODO: occasionally refresh the name list just to get the latest name
 	// ordering
 	if(shouldRefreshNameList) {
@@ -168,7 +170,7 @@ function gameRecorded() {
 
 function gameNotRecorded() {
 	enableSelectors();
-	$(".clear").removeClass("disabled");
+	$(".team .clear").removeClass("disabled");
 	$("#game-record-error-box").removeClass("hidden");
 }
 
