@@ -13,13 +13,12 @@ function setUp() {
 }
 
 function refreshNameList() {
-	var replacement = document.createElement("div");
-	replacement.id = "name-list";
 	$.get("/players").done(function(data) {
+		nameList = $("#name-list");
+		nameList.children().remove();
 		data.forEach(function(player) {
-			$("#templates .player-name").clone().text(player).appendTo(replacement);
+			$("#templates .player-name").clone().text(player).appendTo(nameList);
 		});
-		$("#name-list").replaceWith(replacement);
 	});
 }
 

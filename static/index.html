@@ -19,22 +19,22 @@
 		<div class="player-name" onclick="queueName(this.textContent)"></div>
 	</div>
 	<div class="team" id="left">
-		<div class="player-list" onclick="recordGame('blue')"></div>
+		<div class="player-list blue" onclick="recordGame('blue')"></div>
 		<input class="level" type="number" min="1" max="10" disabled>
 		<div class="webdev-is-fun"></div>
 	</div>
-	<div class="tie" onclick="recordGame('tie')"><div class="uninitialized" id="tie">Tie</div></div>
-	<div class="sync">
+	<div class="tie neutral" onclick="recordGame('tie')"><div class="uninitialized" id="tie">Tie</div></div>
+	<div class="sync neutral">
 		<input type="checkbox" id="sync" disabled>
 		<label for="sync">Keep multipliers synchronized</label>
 	</div>
 	<div class="webdev-is-fun"></div>
 	<div class="team" id="right">
-		<div class="player-list" onclick="recordGame('orange')"></div>
+		<div class="player-list orange" onclick="recordGame('orange')"></div>
 		<input class="level" type="number" min="1" max="10" disabled>
 		<div class="webdev-is-fun"></div>
 	</div>
-	<div class="player" id="new-player">
+	<div class="player neutral" id="new-player">
 		<form>
 			<input type="text" class="name" id="name">
 			<input type="submit" id="add-player" value="Add">
@@ -44,6 +44,6 @@
 	<div id="game-record-error-box" class="error hidden">
 		Something went wrong while trying to record the game. Feel free to try again.
 	</div>
-	<div id="name-list"></div>
+	<div id="name-list" class="neutral"></div>
 </body>
 </html>
