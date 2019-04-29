@@ -1,14 +1,13 @@
 body {
 	background: #879190 url(bg.jpg) center top no-repeat;
+	font-size: 24px;
 }
 #templates { display: none; }
 .team {
-	font-size: 24px;
 	margin-top: 2ex;
 	margin-bottom: 2ex;
 }
 .player {
-	font-size: 24px;
 	margin-top: 2ex;
 	margin-bottom: 2ex;
 }
@@ -77,7 +76,6 @@ input.level {
 	border-radius: 2ex;
 	padding-top: 1ex;
 	padding-bottom: 1ex;
-	font-size: 24px;
 	width: 50%;
 	text-align: center;
 }
@@ -97,25 +95,45 @@ input.level {
 }
 .clear img { vertical-align: middle; }
 .webdev-is-fun { clear: both; }
-#name-list div {
-	border-radius: 2ex;
-	font-size: 24px;
-	margin-left: 25%;
-	margin-right: 25%;
-	padding-top: 1ex;
-	padding-bottom: 1ex;
+#name-list .player-queuer {
 	margin-top: 1ex;
 	margin-bottom: 1ex;
-	text-align: center;
 }
-.spacer {
-	margin-top: 10ex;
+.player-name {
+	width: 50%;
+	border-radius: 2ex;
+	padding-top: 1ex;
+	padding-bottom: 1ex;
+	margin-left: 1em;
+	margin-right: 1em;
+	text-align: center;
+	display: inline-block;
+}
+.queue-control {
+	display: inline-block;
+	width: 2em;
+	border-radius: 2ex;
+	padding-top: 1ex;
+	padding-bottom: 1ex;
+	text-align: center;
+	font-weight: bold;
+}
+.queue-control.blue {
+	margin-left: calc(25% - 3em);
+	background-color: #078df6;
+	color: #e7eff6;
+}
+.queue-control.orange {
+	background-color: #f69707;
+	color: #f6f0e7;
 }
 #new-player {
 	border-radius: 2ex;
-	font-size: 24px;
-	margin-left: 25%;
-	margin-right: 25%;
+	width: 50%;
+	margin-top: 10ex;
+	padding-top: 0;
+	padding-bottom: 0;
+	display: inline-block;
 }
 #new-player input {
 	font-size: inherit;

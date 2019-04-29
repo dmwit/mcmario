@@ -16,7 +16,11 @@
 		</div>
 		<div class="tie">Tie</div>
 		<div class="overtime">Overtime</div>
-		<div class="player-name" onclick="queueName(this.textContent)"></div>
+		<div class="player-queuer"><!-- this one is just for consistency
+			--><div class="queue-control blue" onclick="queueName($(this).next().text(),'left')">+</div><!-- there must be no space between these divs
+			--><div class="player-name" onclick="queueName(this.textContent)"></div><!-- there must be no space between these divs
+			--><div class="queue-control orange" onclick="queueName($(this).prev().text(),'right')">+</div>
+		</div>
 	</div>
 	<div class="team" id="left">
 		<div class="player-list blue" onclick="recordGame('blue')"></div>
@@ -34,15 +38,19 @@
 		<input class="level" type="number" min="1" max="10" disabled>
 		<div class="webdev-is-fun"></div>
 	</div>
-	<div class="player neutral" id="new-player">
-		<form>
-			<input type="text" class="name" id="name">
-			<input type="submit" id="add-player" value="Add">
-		</form>
-		<div class="webdev-is-fun"></div>
-	</div>
 	<div id="game-record-error-box" class="error hidden">
 		Something went wrong while trying to record the game. Feel free to try again.
+	</div>
+	<div class="player-queuer"><!-- this one is just for consistency
+		--><div class="queue-control blue" onclick="addName(null,'left')">+</div><!-- there must be no space between these divs
+		--><div class="neutral player-name" id="new-player">
+			<form>
+				<input type="text" class="name" id="name">
+				<input type="submit" id="add-player" value="Add">
+			</form>
+			<div class="webdev-is-fun"></div>
+		</div><!-- there must be no space between these divs
+		--><div class="queue-control orange" onclick="addName(null,'right')">+</div>
 	</div>
 	<div id="name-list" class="neutral"></div>
 </body>

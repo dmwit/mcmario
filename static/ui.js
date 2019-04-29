@@ -14,42 +14,45 @@ function setUp() {
 
 function refreshNameList() {
 	$.get("/players").done(function(data) {
-		nameList = $("#name-list");
+		var nameList = $("#name-list");
 		nameList.children().remove();
 		data.forEach(function(player) {
-			$("#templates .player-name").clone().text(player).appendTo(nameList);
+			var container = $("#templates .player-queuer").clone();
+			container.find(".player-name").text(player);
+			container.appendTo(nameList);
 		});
 	});
 }
 
-function addName() {
+function addName(ev, side) {
 	var name = $("#new-player .name").prop("value");
 	// Just to filter out mistaken clicks. The server itself doesn't care what
 	// name you pick.
 	if(name.match(/[a-zA-Z]/)) {
-		queueName(name);
+		queueName(name, side);
 		$("#name").val('');
 	}
 	shouldRefreshNameList = true;
 	return false;
 }
 
-function queueName(name) {
+function queueName(name, side) {
 	$(".name").each(function() {
 		if(this.textContent == name)
 			$(this).parent().remove();
 	});
 
-	var side;
-	var leftSize  = $("#left  .name").length;
-	var rightSize = $("#right .name").length;
-	if     (leftSize < rightSize) side = "left";
-	else if(rightSize < leftSize) side = "right";
-	else                          side = nextSide;
+	if(!side) {
+		var leftSize  = $("#left  .name").length;
+		var rightSize = $("#right .name").length;
+		if     (leftSize < rightSize) side = "left";
+		else if(rightSize < leftSize) side = "right";
+		else                          side = nextSide;
+	}
 
 	nextSide = otherSide(side);
 	$("#" + side + " .name-container").slice(3).remove();
-	div = $("#templates .name-container").clone();
+	var div = $("#templates .name-container").clone();
 	div.children(".name").text(name);
 	div.prependTo($("#" + side + " .player-list"));
 	refreshMatchup();
@@ -70,7 +73,6 @@ function refreshMatchup() {
 function clearPlayer(img, ev) {
 	$(img).parent().remove();
 	refreshMatchup();
-	// TODO: does this work on IE??
 	// see also https://stackoverflow.com/q/387736/791604
 	if(ev.stopPropagation) ev.stopPropagation();
 	ev.cancelBubble = true;
