@@ -95,9 +95,12 @@ input.level {
 }
 .clear img { vertical-align: middle; }
 .webdev-is-fun { clear: both; }
-#name-list .player-queuer {
+.player-queuer {
 	margin-top: 1ex;
 	margin-bottom: 1ex;
+	display: flex;
+	justify-content: center;
+	align-items: center;
 }
 .player-name {
 	width: 50%;
@@ -107,10 +110,8 @@ input.level {
 	margin-left: 1em;
 	margin-right: 1em;
 	text-align: center;
-	display: inline-block;
 }
 .queue-control {
-	display: inline-block;
 	width: 2em;
 	border-radius: 2ex;
 	padding-top: 1ex;
@@ -119,7 +120,6 @@ input.level {
 	font-weight: bold;
 }
 .queue-control.blue {
-	margin-left: calc(25% - 3em);
 	background-color: #078df6;
 	color: #e7eff6;
 }
@@ -127,13 +127,14 @@ input.level {
 	background-color: #f69707;
 	color: #f6f0e7;
 }
+#new-player-queuer {
+	margin-top: 10ex;
+}
 #new-player {
 	border-radius: 2ex;
 	width: 50%;
-	margin-top: 10ex;
 	padding-top: 0;
 	padding-bottom: 0;
-	display: inline-block;
 }
 #new-player input {
 	font-size: inherit;
