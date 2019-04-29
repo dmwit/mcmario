@@ -24,11 +24,6 @@ body {
 	margin-bottom: 0.5ex;
 	width: 100%;
 }
-select {
-	font-size: inherit;
-	float: left;
-	margin-left: 5%;
-}
 input.level {
 	font-size: inherit;
 	float: right;
