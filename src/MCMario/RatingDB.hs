@@ -170,14 +170,14 @@ matchup games ratings lNames rNames = case S.lookupMin lNames >>= flip M.lookup 
 	lWinEdges = edgesBetween games lNames rNames
 	rWinEdges = edgesBetween games rNames lNames
 	meanRating name = case M.lookup name componentMap of
-		Just component -> geometricMean (ratings `M.restrictKeys` component)
+		Just component -> geometricMean $ M.union
+			(ratings `M.restrictKeys` component)
+			(M.fromSet (const defaultRating) component)
 		Nothing -> defaultRating
 	normalizedTotalRating names = sum
 		[ M.findWithDefault defaultRating name ratings / meanRating name
 		| name <- S.toList names
 		]
-	lNormalizedRating = normalizedTotalRating lNames
-	rNormalizedRating = normalizedTotalRating rNames
 	lRating' = normalizedTotalRating lNames * 1.3^length lWinEdges
 	rRating' = normalizedTotalRating rNames * 1.3^length rWinEdges
 
