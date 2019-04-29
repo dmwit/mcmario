@@ -51,15 +51,15 @@ input.level {
 	color: #7a4b03;
 }
 .neutral {
-	background-color: #327c34;
-	color: #cfeacf;
+	background-color: #eeeeee;
+	color: #333333;
 }
 .neutral .player-name {
-	background-color: #327c34;
-	color: #cfeacf;
+	background-color: #eeeeee;
+	color: #333333;
 }
 .neutral .uninitialized {
-	color: #1f3920;
+	color: #aaaaaa;
 }
 .name {
 	width: 90%;
