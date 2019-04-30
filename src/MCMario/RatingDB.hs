@@ -19,15 +19,40 @@ import MCMario.Model
 import qualified Data.Map as M
 import qualified Data.Set as S
 
+-- | A number between 0 and 1.
+type Probability = Double
+
+-- | The maximum uncertain probability.
+maxProbability :: Probability
+maxProbability = 0.9999999999999999
+
+-- log 0 is -Infinity, that's right out
+-- log 1 is perfectly fine, but let's avoid it anyway for symmetry
+clipProbability :: Probability -> Probability
+clipProbability = min maxProbability . max epsilon
+
+data Rating = Rating
+	{ offense :: Rate
+	-- ^ The rate at which a player creates scoring opportunities for their
+	-- team.
+	, defense :: Probability
+	-- ^ The probability that a player allows the opposing team's scoring
+	-- opportunity through to become a goal.
+	} deriving (Eq, Ord, Read, Show)
+
+instance Monoid Rating where mempty = Rating 0 1
+instance Semigroup Rating where
+	r <> r' = Rating (offense r + offense r') (defense r * defense r')
+
 -- | Information used for choosing a handicap, organized by player. This type
 -- is intended to be abstract; don't rely on it being a @Map Name Rating@.
-type RatingDB  = Map Name Rate
-type Gradients = Map Name Rate
+type RatingDB  = Map Name Rating
+type Gradients = Map Name Rating
 
--- | The rating we use by default if (perhaps by some bug) they don't have a
--- rating when we go to look for one.
-defaultRating :: Rate
-defaultRating = 3
+-- | The rating we use by default if (perhaps by some bug) a player doesn't
+-- have a rating when we go to look for one.
+defaultRating :: Rating
+defaultRating = Rating 3 0.5
 
 -- | The highest score multiplier we're willing to consider.
 maxMultiplier :: Integer
@@ -44,10 +69,14 @@ improveComponentRatings gdb rdb ns = id
 	. M.fromSet (const defaultRating)
 	$ ns
 
--- | Set somebody's rate. Does some minor sanity checking to make sure the rate
--- is positive.
-setRate :: Name -> Rate -> RatingDB -> RatingDB
-setRate n = M.insert n . max epsilon
+-- | Do some minor sanity checking to make sure the offensive rate is positive
+-- and the defensive probability is nontrivial.
+clipRating :: Rating -> Rating
+clipRating r = Rating (max epsilon $ offense r) (clipProbability $ defense r)
+
+-- | Set somebody's rating. Uses 'clipRating' to sanity check first.
+setRating :: Name -> Rating -> RatingDB -> RatingDB
+setRating n = M.insert n . clipRating
 
 -- | We use the log-likelihood of the game records we've seen as the objective.
 -- Any player with no 'Rate' is given some sensible default.
@@ -55,16 +84,14 @@ objective :: [GameRecord] -> RatingDB -> Double
 -- We divide by the length so that the learning rate applies consistently no
 -- matter how many games we're training on.
 objective gs rs = sum (map gameObjective gs) / fromIntegral (length gs) where
-	gameObjective g = log (clipProb p) where
-		rBlue   = teamRating (blue   g)
-		rOrange = teamRating (orange g)
-		p = gameProbability (winner g) (handicap g) rBlue rOrange
+	gameObjective g = log (clipProbability p) where
+		ratingBlue   = foldMap playerRating (blue   g)
+		ratingOrange = foldMap playerRating (orange g)
+		rateBlue   = offense ratingBlue   * defense ratingOrange
+		rateOrange = offense ratingOrange * defense ratingBlue
+		p = gameProbability (winner g) (handicap g) rateBlue rateOrange
 
-	-- log 0 is -Infinity, that's right out
-	-- log 1 is perfectly fine, but let's avoid it anyway for symmetry
-	clipProb = min 0.9999999999999999 . max epsilon
 	playerRating n = M.findWithDefault defaultRating n rs
-	teamRating = sum . map playerRating . S.toList
 
 -- TODO: Currently, when finding the gradient at player X, we compute the
 -- objective function over all games in X's component. But actually the
@@ -77,10 +104,16 @@ objective gs rs = sum (map gameObjective gs) / fromIntegral (length gs) where
 -- | Find the approximate gradient of the objective function numerically.
 numericGradient :: [GameRecord] -> RatingDB -> Gradients
 numericGradient gs rs = M.mapWithKey numGradAt rs where
-	numGradAt n r = (f hi - f lo) / (hi - lo) where
-		f x = objective gs (setRate n x rs)
-		hi = r * 1.00001
-		lo = r / 1.00001
+	numGradAt n r = Rating
+		((fO hiO - fO loO) / (hiO - loO))
+		((fD hiD - fD loD) / (hiD - loD))
+		where
+		fO x = objective gs (setRating n r { offense = x } rs)
+		fD x = objective gs (setRating n r { defense = x } rs)
+		hiO = offense r * 1.00001
+		hiD = defense r * 1.00001
+		loO = offense r / 1.00001
+		loD = defense r / 1.00001
 
 -- TODO: This adjustmentFactor stuff is assuming everything is positive; should
 -- be bother being worried about that? Currently:
@@ -98,16 +131,16 @@ numericGradient gs rs = M.mapWithKey numGradAt rs where
 -- this factor of its previous value.
 --
 -- The learning parameter and adjustment factor are assumed to be positive.
-gradAscendStep :: Rate -> Rate -> [GameRecord] -> RatingDB -> RatingDB
+gradAscendStep :: Rating -> Double -> [GameRecord] -> RatingDB -> RatingDB
 gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
-	(\v dv -> clip v (v + dv*learningRate))
+	(\r dr -> clipRating $ Rating
+		(clip (offense r) (offense r + offense dr*offense learningRate))
+		(clip (defense r) (defense r + defense dr*defense learningRate))
+	)
 	rs
 	(numericGradient gs rs)
 	where
-	clip v = id
-		. max epsilon
-		. max (v/adjustmentFactor)
-		. min (v*adjustmentFactor)
+	clip v = max (v/adjustmentFactor) . min (v*adjustmentFactor)
 
 -- TODO: look into using SBV's SReal for the optimization problem here
 
@@ -119,7 +152,7 @@ gradAscendStep learningRate adjustmentFactor gs rs = M.intersectionWith
 -- this factor of its previous value.
 --
 -- The learning parameter and adjustment factor are assumed to be positive.
-gradAscend :: Rate -> Rate -> [GameRecord] -> RatingDB -> [RatingDB]
+gradAscend :: Rating -> Double -> [GameRecord] -> RatingDB -> [RatingDB]
 gradAscend learningRate adjustmentFactor gs rs
 	= iterate (gradAscendStep learningRate adjustmentFactor gs) rs
 
@@ -156,10 +189,9 @@ matchup games ratings lNames rNames = case S.lookupMin lNames >>= flip M.lookup 
 	rRating = totalRating rNames
 	confident   m = m { confidence = Confident   }
 	provisional m = m { confidence = Provisional }
-	totalRating = id
-		. sum
-		. map (\name -> M.findWithDefault defaultRating name ratings)
-		. S.toList
+	totalRating = foldMap (\name -> M.findWithDefault defaultRating name ratings)
+
+-- TODO: update to new Rating format from here down
 
 	-- Heuristic: normalize rates by dividing by each player's component's (geometric)
 	-- average rating. Then count how many games involve players on one team

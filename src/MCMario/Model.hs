@@ -57,28 +57,6 @@ tieProbability handicap rBlue rOrange = totalWeight / normalizationFactor where
 	weightsOrange = spacedWeights (denominator handicap) rOrange
 	totalWeight = sum $ zipWith (*) weightsBlue weightsOrange
 
--- TODO: This has an odd behavior, I think. Namely: it penalizes players who
--- choose to participate in team games for tying the game. Since we add the
--- rates of the players on the teams, this drastically reduces the probability
--- of a tie; so this model probably underestimates the probability of
--- well-composed teams tying. (Even teams of absolutely top-notch players tie,
--- just think of how many of the videos you've watched on YouTube of pro
--- players end up going into overtime.)
---
--- Perhaps we can fix this by shifting the interpretation of the rate from
--- being a rate of goals to a rate of shots, and adding a parameter to each
--- player for the probability that any given shot makes it into net. This way,
--- teams would have higher shot rates, yes, but they'd also have lower chances
--- of letting shots into goal, and ties would become likely again. To avoid
--- being able to inflate these indefinitely without changing predictions, we
--- can clip the shot success rate parameter to being between 0 and 1 (well,
--- epsilon and 1-epsilon, probably).
---
--- How to compose parameters on a team? Shot rates add as before. For shot
--- success rates, I think it makes sense to allow a shot to score if everybody
--- on the other team gets a chance to block and fails. So the success rates
--- multiply.
-
 -- | Given the handicap -- a factor by which orange's score is multiplied --
 -- and the rates at which the blue team and orange team score goals, compute
 -- the probability of the given game outcome.
