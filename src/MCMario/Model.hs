@@ -10,23 +10,16 @@ import Data.List.Split
 import Data.Ratio
 import MCMario.GameDB
 
--- | A measure of how quickly a player clears viruses. (The parameter to a
--- Poisson or exponential distribution.) Functions that accept one of these
--- expect it to be positive.
---
--- You are intended to treat this type as abstract (i.e. not know that it's
--- actually a @Double@).
+-- | A measure of how quickly a team scores goals. (The parameter to a Poisson
+-- or exponential distribution.) Functions that accept one of these expect it
+-- to be positive.
 type Rate = Double
 
 -- | The smallest positive rate.
 epsilon :: Rate
 epsilon = 5e-324
 
--- TODO: address https://stackoverflow.com/q/45067989/791604
--- (if it hasn't been fixed upstream already)
-
--- | Take the geometric mean with all the available precision. Assumes a
--- non-empty container.
+-- | Take the geometric mean. Assumes a non-empty container.
 geometricMean :: (Functor f, Foldable f) => f Rate -> Rate
 geometricMean rs
 	| null rs = error "geometricMean called on empty container"
