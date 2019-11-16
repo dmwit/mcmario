@@ -1,0 +1,21 @@
+.link-button {
+	background: none;
+	border: none;
+	color: blue;
+	text-decoration: underline;
+	cursor: pointer;
+	font-size: 1em;
+	font-family: serif;
+}
+.link-button:focus {
+	outline: none;
+}
+.link-button:active {
+	color: red;
+}
+.teaser {
+	text-align: center;
+}
+.create-account {
+	text-align: center;
+}
