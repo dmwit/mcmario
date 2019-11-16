@@ -17,7 +17,7 @@ executable mcmario
   main-is:             mcmario.hs
   other-modules:       UI
   -- other-extensions:
-  build-depends:       base ^>=4.12.0.0
+  build-depends:       base ^>=4.11.0.0
                      , argon2 ^>=1.3
                      , bytestring ^>=0.10
                      , lucid ^>=2.9
